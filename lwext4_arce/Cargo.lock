@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "lwext4-rust"
+name = "lwext4_arce"
 version = "0.1.0"
