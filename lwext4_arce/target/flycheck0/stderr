@@ -1,5 +1,5 @@
-   0.007677376s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("lwext4_arce", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/src/lib.rs", Edition2024) }
-   0.007694181s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/target/debug/.fingerprint/lwext4_arce-7c8987431b8e8421/lib-lwext4_arce`
+   0.008719457s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("lwext4_arce", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/src/lib.rs", Edition2021) }
+   0.008735523s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/target/debug/.fingerprint/lwext4_arce-f0250099bea965f8/lib-lwext4_arce`
 
 Caused by:
     No such file or directory (os error 2)
@@ -43,8 +43,8 @@ Stack backtrace:
   25: __libc_start_main_impl
              at ./csu/../csu/libc-start.c:360:3
   26: <unknown>
-   0.059547686s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("lwext4_arce", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/src/lib.rs", Edition2024) }
-   0.059561994s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/target/debug/.fingerprint/lwext4_arce-617bdfd5cdad3993/test-lib-lwext4_arce`
+   0.061364655s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("lwext4_arce", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/src/lib.rs", Edition2021) }
+   0.061380071s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/target/debug/.fingerprint/lwext4_arce-9471d594f16c3f8a/test-lib-lwext4_arce`
 
 Caused by:
     No such file or directory (os error 2)

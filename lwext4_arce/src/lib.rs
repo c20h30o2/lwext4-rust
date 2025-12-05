@@ -17,9 +17,11 @@ extern crate alloc;
 extern crate log;
 
 // 内部实现：模拟libc的必要功能（如内存分配、打印）
+#[cfg(feature = "use-ffi")]
 mod ulibc;
 
 // 对外暴露的FFI（Foreign Function Interface）绑定
+#[cfg(feature = "use-ffi")]
 pub mod ffi {
     // 允许非大写全局变量（C风格）
     #![allow(non_upper_case_globals)]
@@ -30,6 +32,25 @@ pub mod ffi {
 
     // 包含自动生成的C绑定（由bindgen生成）
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+}
+
+// 使用纯 Rust 实现时，从 lwext4_core 导入所有接口
+#[cfg(feature = "use-rust")]
+pub mod ffi {
+    // 重新导出 lwext4_core 的所有内容
+    pub use lwext4_core::*;
+
+    // 类型别名：将 Rust 风格的类型名映射为 C 风格
+    pub type ext4_fs = Ext4Filesystem;
+    pub type ext4_sblock = Ext4Superblock;
+    pub type ext4_inode = Ext4Inode;
+    pub type ext4_inode_ref = Ext4InodeRef;
+    pub type ext4_blockdev = Ext4BlockDevice;
+    pub type ext4_blockdev_iface = u8;  // 占位
+    pub type ext4_bcache = u8;  // 占位
+    pub type ext4_dir_en = Ext4DirEntry;
+    pub type ext4_dir_iter = Ext4DirIterator;
+    pub type ext4_dir_search_result = u8;  // 占位
 }
 
 // 块设备抽象模块
