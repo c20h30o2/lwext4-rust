@@ -1,5 +1,92 @@
-error: failed to parse manifest at `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core/Cargo.toml`
+   0.030912175s  INFO prepare_target{force=false package_id=lwext4_core v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core) target="lwext4_core"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_core v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("lwext4_core", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core/src/lib.rs", Edition2021) }
+   0.030928417s  INFO prepare_target{force=false package_id=lwext4_core v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core) target="lwext4_core"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core/target/debug/.fingerprint/lwext4_core-93b6dce0ea873b31/lib-lwext4_core`
 
 Caused by:
-  no targets specified in the manifest
-  either src/lib.rs, src/main.rs, a [lib] section, or [[bin]] section must be present
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: cargo_util::paths::read_bytes
+   1: cargo_util::paths::read
+   2: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::main
+  12: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  13: std::rt::lang_start::<()>::{closure#0}
+  14: core::ops::function::impls::<impl core::ops::function::FnOnce<A> for &F>::call_once
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/core/src/ops/function.rs:287:21
+  15: std::panicking::catch_unwind::do_call
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs:590:40
+  16: std::panicking::catch_unwind
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs:553:19
+  17: std::panic::catch_unwind
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panic.rs:359:14
+  18: std::rt::lang_start_internal::{{closure}}
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/rt.rs:175:24
+  19: std::panicking::catch_unwind::do_call
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs:590:40
+  20: std::panicking::catch_unwind
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs:553:19
+  21: std::panic::catch_unwind
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panic.rs:359:14
+  22: std::rt::lang_start_internal
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/rt.rs:171:5
+  23: main
+  24: __libc_start_call_main
+             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+  25: __libc_start_main_impl
+             at ./csu/../csu/libc-start.c:360:3
+  26: <unknown>
+   0.083576647s  INFO prepare_target{force=false package_id=lwext4_core v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core) target="lwext4_core"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_core v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("lwext4_core", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core/src/lib.rs", Edition2021) }
+   0.083587293s  INFO prepare_target{force=false package_id=lwext4_core v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core) target="lwext4_core"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core/target/debug/.fingerprint/lwext4_core-430f075eef18e1eb/test-lib-lwext4_core`
+
+Caused by:
+    No such file or directory (os error 2)
+
+Stack backtrace:
+   0: cargo_util::paths::read_bytes
+   1: cargo_util::paths::read
+   2: cargo::core::compiler::fingerprint::_compare_old_fingerprint
+   3: cargo::core::compiler::fingerprint::prepare_target
+   4: cargo::core::compiler::compile
+   5: <cargo::core::compiler::build_runner::BuildRunner>::compile
+   6: cargo::ops::cargo_compile::compile_ws
+   7: cargo::ops::cargo_compile::compile_with_exec
+   8: cargo::ops::cargo_compile::compile
+   9: cargo::commands::check::exec
+  10: <cargo::cli::Exec>::exec
+  11: cargo::main
+  12: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+  13: std::rt::lang_start::<()>::{closure#0}
+  14: core::ops::function::impls::<impl core::ops::function::FnOnce<A> for &F>::call_once
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/core/src/ops/function.rs:287:21
+  15: std::panicking::catch_unwind::do_call
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs:590:40
+  16: std::panicking::catch_unwind
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs:553:19
+  17: std::panic::catch_unwind
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panic.rs:359:14
+  18: std::rt::lang_start_internal::{{closure}}
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/rt.rs:175:24
+  19: std::panicking::catch_unwind::do_call
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs:590:40
+  20: std::panicking::catch_unwind
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panicking.rs:553:19
+  21: std::panic::catch_unwind
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/panic.rs:359:14
+  22: std::rt::lang_start_internal
+             at /rustc/f8297e351a40c1439a467bbbb6879088047f50b3/library/std/src/rt.rs:171:5
+  23: main
+  24: __libc_start_call_main
+             at ./csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+  25: __libc_start_main_impl
+             at ./csu/../csu/libc-start.c:360:3
+  26: <unknown>
+    Checking lwext4_core v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
