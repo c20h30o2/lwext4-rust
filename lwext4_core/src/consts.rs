@@ -18,6 +18,9 @@ pub const EXT4_INODE_BLOCKS: usize = 15;
 /// 直接块数量
 pub const EXT4_INODE_DIRECT_BLOCKS: usize = 12;
 
+/// 块设备缓存大小（缓存的块数量）
+pub const CONFIG_BLOCK_DEV_CACHE_SIZE: usize = 8;
+
 /// Inode flags: 使用 extent 树
 pub const EXT4_INODE_FLAG_EXTENTS: u32 = 0x80000;
 

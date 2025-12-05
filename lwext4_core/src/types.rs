@@ -67,7 +67,7 @@ pub struct Ext4Inode {
     pub blocks_count_lo: u32,        // 28: 块数（低32位）
     pub flags: u32,                  // 32: 标志
     pub osd1: u32,                   // 36: OS 相关1
-    pub block: [u32; EXT4_INODE_BLOCKS], // 40: 块指针数组（60字节）
+    pub blocks: [u32; EXT4_INODE_BLOCKS], // 40: 块指针数组（60字节）
     pub generation: u32,             // 100: 文件版本
     pub file_acl_lo: u32,            // 104: 文件 ACL（低32位）
     pub size_hi: u32,                // 108: 文件大小（高32位）
@@ -112,9 +112,13 @@ pub trait BlockDevice {
 
 /// 文件系统结构
 pub struct Ext4Filesystem {
+    pub read_only: bool,             // 只读模式
+    pub bdev: *mut Ext4BlockDevice,  // 块设备指针
     pub sb: Ext4Superblock,          // Superblock
+    pub inode_block_limits: [u64; 4], // inode 块限制
+    pub inode_blocks_per_level: [u64; 4], // 每级 inode 块数
     pub block_size: u32,             // 块大小（字节）
-    pub inode_size: u16,             // inode 大小
+    pub inode_size: u32,             // inode 大小（从u16改为u32以匹配C）
     pub inodes_per_group: u32,       // 每组 inode 数
     pub blocks_per_group: u32,       // 每组块数
     pub block_group_count: u32,      // 块组总数
@@ -123,12 +127,47 @@ pub struct Ext4Filesystem {
 impl Ext4Filesystem {
     pub fn new() -> Self {
         Self {
+            read_only: false,
+            bdev: ptr::null_mut(),
             sb: Ext4Superblock::default(),
+            inode_block_limits: [0; 4],
+            inode_blocks_per_level: [0; 4],
             block_size: 0,
             inode_size: 0,
             inodes_per_group: 0,
             blocks_per_group: 0,
             block_group_count: 0,
+        }
+    }
+}
+
+/// 缓冲区结构（简化版）
+#[repr(C)]
+pub struct Ext4Buf {
+    pub flags: i32,                  // 标志位
+    pub lba: u64,                    // 逻辑块地址
+    pub data: *mut u8,               // 数据指针
+    pub lru_prio: u32,               // LRU优先级
+    pub lru_id: u32,                 // LRU ID
+    pub refctr: u32,                 // 引用计数
+    pub bc: *mut u8,                 // 块缓存指针（暂用u8代替Ext4BlockCache）
+    pub on_dirty_list: bool,         // 是否在脏列表中
+}
+
+/// 块缓存条目
+#[repr(C)]
+pub struct Ext4Block {
+    pub lb_id: u64,                  // 逻辑块ID
+    pub buf: *mut Ext4Buf,           // 缓冲区指针
+    pub data: *mut u8,               // 数据指针
+}
+
+impl Ext4Block {
+    pub fn new() -> Self {
+        Self {
+            lb_id: 0,
+            buf: ptr::null_mut(),
+            data: ptr::null_mut(),
         }
     }
 }
@@ -152,28 +191,39 @@ impl Ext4BlockDevice {
     }
 }
 
+/// 目录项结构的union字段（C中的in字段）
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct Ext4DirEntryIn {
+    pub inode_type: u8,              // inode 类型
+}
+
 /// 目录项结构
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct Ext4DirEntry {
     pub inode: u32,                  // inode 编号
-    pub rec_len: u16,                // 记录长度
-    pub name_len: u8,                // 名称长度
-    pub inode_type: u8,              // inode 类型
+    pub entry_length: u16,           // 记录长度（匹配C命名）
+    pub name_length: u8,             // 名称长度（匹配C命名）
+    pub in_: Ext4DirEntryIn,         // union字段（匹配C命名）
     // name 字段动态长度，不在此定义
 }
 
 /// 目录迭代器
 pub struct Ext4DirIterator {
-    pub curr_offset: u64,            // 当前偏移量
-    pub curr_inode: u32,             // 当前目录 inode
+    pub inode_ref: *mut Ext4InodeRef, // inode引用指针
+    pub curr_blk: Ext4Block,         // 当前块
+    pub curr_off: u64,               // 当前偏移量（匹配C命名）
+    pub curr: *mut Ext4DirEntry,     // 当前目录项指针
 }
 
 impl Ext4DirIterator {
-    pub fn new(inode: u32) -> Self {
+    pub fn new() -> Self {
         Self {
-            curr_offset: 0,
-            curr_inode: inode,
+            inode_ref: ptr::null_mut(),
+            curr_blk: Ext4Block::new(),
+            curr_off: 0,
+            curr: ptr::null_mut(),
         }
     }
 }
