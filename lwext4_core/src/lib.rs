@@ -22,8 +22,9 @@ pub use consts::*;
 pub use error::{Ext4Error, Ext4Result};
 pub use types::*;
 
-// 重新导出核心API
-pub use fs::{ext4_fs_init, ext4_fs_fini};
-pub use block::{ext4_block_init, ext4_block_fini, ext4_block_readbytes, ext4_block_writebytes};
-pub use inode::{ext4_fs_get_inode_ref, ext4_fs_put_inode_ref};
-pub use dir::{ext4_dir_find_entry, ext4_dir_iterator_init, ext4_dir_iterator_next};
+// 重新导出所有API函数
+pub use fs::*;
+pub use block::*;
+pub use inode::*;
+pub use dir::*;
+pub use superblock::*;
