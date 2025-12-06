@@ -51,8 +51,16 @@ pub struct ext4_sblock {
     pub feature_incompat: u32,       // 96: 不兼容特性
     pub feature_ro_compat: u32,      // 100: 只读兼容特性
 
-    // 更多字段暂时省略，需要时添加
-    pub reserved: [u8; 924],         // 填充到 1024 字节
+    // 更多字段（简化版 - 只保留关键字段）
+    pub uuid: [u8; 16],              // 104: 128位UUID
+    pub volume_name: [u8; 16],       // 120: 卷名称
+    pub last_mounted: [u8; 64],      // 136: 最后挂载路径
+    pub blocks_count_hi: u32,        // 200: 总块数（高32位）
+    pub r_blocks_count_hi: u32,      // 204: 保留块数（高32位）
+    pub free_blocks_count_hi: u32,   // 208: 空闲块数（高32位）
+
+    // 填充到 1024 字节
+    pub reserved: [u8; 812],         // 212-1023: 保留
 }
 
 impl Default for ext4_sblock {
@@ -63,16 +71,16 @@ impl Default for ext4_sblock {
 
 /// Inode 结构
 ///
-/// 对应C定义: struct ext4_inode (ext4_types.h:373-413)
+/// 对应C定义: struct ext4_inode (ext4_types.h:373-419)
 #[derive(Debug, Clone, Copy)]
 pub struct ext4_inode {
     pub mode: u16,                   // 0: 文件模式
     pub uid: u16,                    // 2: 所有者 uid（低16位）
     pub size_lo: u32,                // 4: 文件大小（低32位）
-    pub atime: u32,                  // 8: 访问时间
-    pub ctime: u32,                  // 12: 创建时间
-    pub mtime: u32,                  // 16: 修改时间
-    pub dtime: u32,                  // 20: 删除时间
+    pub access_time: u32,            // 8: 访问时间（C字段名）
+    pub change_inode_time: u32,      // 12: inode改变时间（C字段名）
+    pub modification_time: u32,      // 16: 修改时间（C字段名）
+    pub deletion_time: u32,          // 20: 删除时间（C字段名）
     pub gid: u16,                    // 24: 组 gid（低16位）
     pub links_count: u16,            // 26: 硬链接数
     pub blocks_count_lo: u32,        // 28: 块数（低32位）
@@ -82,9 +90,25 @@ pub struct ext4_inode {
     pub generation: u32,             // 100: 文件版本
     pub file_acl_lo: u32,            // 104: 文件 ACL（低32位）
     pub size_hi: u32,                // 108: 文件大小（高32位）
+    pub obso_faddr: u32,             // 112: 废弃的fragment地址
 
-    // 更多字段暂时省略
-    pub reserved: [u8; 28],          // 填充到标准 inode 大小
+    // osd2 union - 简化处理，只保留关键字段
+    pub blocks_high: u16,            // 116: 块数高16位
+    pub file_acl_high: u16,          // 118: ACL高16位
+    pub uid_high: u16,               // 120: uid高16位
+    pub gid_high: u16,               // 122: gid高16位
+    pub checksum_lo: u16,            // 124: 校验和低16位
+    pub reserved2: u16,              // 126: 保留
+
+    // 扩展字段
+    pub extra_isize: u16,            // 128: 额外inode大小
+    pub checksum_hi: u16,            // 130: 校验和高16位
+    pub ctime_extra: u32,            // 132: 额外change时间
+    pub mtime_extra: u32,            // 136: 额外modification时间
+    pub atime_extra: u32,            // 140: 额外access时间
+    pub crtime: u32,                 // 144: 创建时间
+    pub crtime_extra: u32,           // 148: 额外创建时间
+    pub version_hi: u32,             // 152: 版本高32位
 }
 
 impl Default for ext4_inode {
@@ -189,12 +213,88 @@ impl ext4_block {
     }
 }
 
+/// 块设备接口结构
+///
+/// 对应C定义: struct ext4_blockdev_iface (ext4_blockdev.h:49-103)
+pub struct ext4_blockdev_iface {
+    // 函数指针（使用Option包装，允许为空）
+    pub open: Option<unsafe extern "C" fn(*mut ext4_blockdev) -> i32>,
+    pub bread: Option<unsafe extern "C" fn(*mut ext4_blockdev, *mut core::ffi::c_void, u64, u32) -> i32>,
+    pub bwrite: Option<unsafe extern "C" fn(*mut ext4_blockdev, *const core::ffi::c_void, u64, u32) -> i32>,
+    pub close: Option<unsafe extern "C" fn(*mut ext4_blockdev) -> i32>,
+    pub lock: Option<unsafe extern "C" fn(*mut ext4_blockdev) -> i32>,
+    pub unlock: Option<unsafe extern "C" fn(*mut ext4_blockdev) -> i32>,
+
+    // 数据字段
+    pub ph_bsize: u32,               // 物理块大小
+    pub ph_bcnt: u64,                // 物理块数量
+    pub ph_bbuf: *mut u8,            // 物理块缓冲区
+    pub ph_refctr: u32,              // 引用计数
+    pub bread_ctr: u32,              // 读计数
+    pub bwrite_ctr: u32,             // 写计数
+    pub p_user: *mut core::ffi::c_void,  // 用户数据指针
+}
+
+impl ext4_blockdev_iface {
+    pub fn new() -> Self {
+        Self {
+            open: None,
+            bread: None,
+            bwrite: None,
+            close: None,
+            lock: None,
+            unlock: None,
+            ph_bsize: 0,
+            ph_bcnt: 0,
+            ph_bbuf: ptr::null_mut(),
+            ph_refctr: 0,
+            bread_ctr: 0,
+            bwrite_ctr: 0,
+            p_user: ptr::null_mut(),
+        }
+    }
+}
+
+/// 块缓存结构
+///
+/// 对应C定义: struct ext4_bcache (ext4_bcache.h)
+#[repr(C)]
+pub struct ext4_bcache {
+    pub cnt: u32,                    // 块缓存中的项目数量
+    pub itemsize: u32,               // 块缓存中每个项目的大小
+    pub lru_ctr: u32,                // 最近使用计数器
+    pub ref_blocks: u32,             // 当前引用的数据块
+    pub max_ref_blocks: u32,         // 最大引用的数据块
+    pub bdev: *mut ext4_blockdev,   // 绑定到此块缓存的块设备
+    // 其他字段暂时省略（如dirty_list等）
+}
+
+impl ext4_bcache {
+    pub fn new() -> Self {
+        Self {
+            cnt: 0,
+            itemsize: 0,
+            lru_ctr: 0,
+            ref_blocks: 0,
+            max_ref_blocks: 0,
+            bdev: ptr::null_mut(),
+        }
+    }
+}
+
 /// 块设备结构
 ///
-/// 对应C定义: struct ext4_blockdev (ext4_blockdev.h)
+/// 对应C定义: struct ext4_blockdev (ext4_blockdev.h:106-132)
 pub struct ext4_blockdev {
+    pub bdif: *mut ext4_blockdev_iface,  // 块设备接口
+    pub part_offset: u64,            // 分区偏移（多分区模式）
+    pub part_size: u64,              // 分区大小（多分区模式）
+    pub bc: *mut ext4_bcache,        // 块缓存
     pub lg_bsize: u32,               // 逻辑块大小
     pub lg_bcnt: u64,                // 逻辑块数量
+    pub cache_write_back: u32,       // 缓存回写模式引用计数
+    pub fs: *mut ext4_fs,            // 所属文件系统
+    pub journal: *mut u8,            // 日志（暂用u8）
     pub ph_bsize: u32,               // 物理块大小（通常 512）
     pub ph_bcnt: u64,                // 物理块数量
 }
@@ -202,8 +302,15 @@ pub struct ext4_blockdev {
 impl ext4_blockdev {
     pub fn new() -> Self {
         Self {
+            bdif: ptr::null_mut(),
+            part_offset: 0,
+            part_size: 0,
+            bc: ptr::null_mut(),
             lg_bsize: 0,
             lg_bcnt: 0,
+            cache_write_back: 0,
+            fs: ptr::null_mut(),
+            journal: ptr::null_mut(),
             ph_bsize: EXT4_DEV_BSIZE as u32,
             ph_bcnt: 0,
         }
@@ -316,6 +423,23 @@ impl ext4_dir_iter {
     }
 }
 
+/// 目录搜索结果
+///
+/// 对应C定义: struct ext4_dir_search_result (ext4_dir.h)
+pub struct ext4_dir_search_result {
+    pub block: ext4_block,          // 块
+    pub dentry: *mut ext4_dir_en,   // 目录项指针
+}
+
+impl ext4_dir_search_result {
+    pub fn new() -> Self {
+        Self {
+            block: ext4_block::new(),
+            dentry: ptr::null_mut(),
+        }
+    }
+}
+
 // ===== Type Aliases =====
 // 提供Rust风格的别名，方便使用
 
@@ -334,6 +458,12 @@ pub type Ext4Filesystem = ext4_fs;
 /// Rust风格别名：块设备
 pub type Ext4BlockDevice = ext4_blockdev;
 
+/// Rust风格别名：块设备接口
+pub type Ext4BlockDeviceIface = ext4_blockdev_iface;
+
+/// Rust风格别名：块缓存
+pub type Ext4BlockCache = ext4_bcache;
+
 /// Rust风格别名：缓冲区
 pub type Ext4Buf = ext4_buf;
 
@@ -348,3 +478,6 @@ pub type Ext4DirEntryInternal = ext4_dir_en_internal;
 
 /// Rust风格别名：目录迭代器
 pub type Ext4DirIterator = ext4_dir_iter;
+
+/// Rust风格别名：目录搜索结果
+pub type Ext4DirSearchResult = ext4_dir_search_result;

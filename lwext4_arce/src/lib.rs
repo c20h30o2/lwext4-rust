@@ -4,9 +4,7 @@
 // FFI相关特性（仅use-ffi时启用）
 #![cfg_attr(feature = "use-ffi", feature(linkage))]
 #![cfg_attr(feature = "use-ffi", feature(c_variadic, c_size_t))]
-
-// 启用关联类型默认值特性
-#![feature(associated_type_defaults)]
+#![cfg_attr(feature = "use-ffi", feature(associated_type_defaults))]
 
 //! 该模块是ext4文件系统实现的主入口，定义了对外暴露的接口和核心组件。
 
@@ -42,11 +40,6 @@ pub mod ffi {
     // lwext4_core 已经使用 C 风格命名（ext4_fs, ext4_sblock 等）
     // 并提供了 Rust 风格的类型别名（Ext4Filesystem, Ext4Superblock 等）
     pub use lwext4_core::*;
-
-    // 以下类型暂时用占位，后续实现
-    pub type ext4_blockdev_iface = u8;  // 占位
-    pub type ext4_bcache = u8;  // 占位
-    pub type ext4_dir_search_result = u8;  // 占位
 }
 
 // 块设备抽象模块

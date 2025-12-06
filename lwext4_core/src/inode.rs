@@ -1,7 +1,7 @@
 //! Inode 操作模块
 
 use log::debug;
-use crate::{Ext4Result, Ext4Error, Ext4Filesystem, Ext4InodeRef, Ext4Inode, BlockDevice};
+use crate::{Ext4Result, Ext4Error, Ext4Filesystem, Ext4InodeRef, Ext4Inode, Ext4Superblock, BlockDevice};
 use crate::consts::*;
 
 /// 初始化文件系统并获取 inode 引用（占位实现）
@@ -31,7 +31,9 @@ pub fn ext4_fs_put_inode_ref(inode_ref: *mut Ext4InodeRef) -> i32 {
 }
 
 /// 获取 inode 大小
-pub fn ext4_inode_get_size(inode: *const Ext4Inode) -> u64 {
+pub fn ext4_inode_get_size(sb: *const Ext4Superblock, inode: *const Ext4Inode) -> u64 {
+    // sb参数在此函数中未使用，但为了与C API一致性保留
+    let _ = sb;
     unsafe {
         let size_lo = u32::from_le((*inode).size_lo) as u64;
         let size_hi = u32::from_le((*inode).size_hi) as u64;
@@ -48,23 +50,29 @@ pub fn ext4_inode_set_size(inode: *mut Ext4Inode, size: u64) {
 }
 
 /// 获取 inode 模式
-pub fn ext4_inode_get_mode(inode: *const Ext4Inode) -> u16 {
-    unsafe { u16::from_le((*inode).mode) }
+pub fn ext4_inode_get_mode(sb: *const Ext4Superblock, inode: *const Ext4Inode) -> u32 {
+    // sb参数在此函数中未使用，但为了与C API一致性保留
+    let _ = sb;
+    unsafe { u16::from_le((*inode).mode) as u32 }
 }
 
 /// 设置 inode 模式
-pub fn ext4_inode_set_mode(inode: *mut Ext4Inode, mode: u16) {
-    unsafe { (*inode).mode = mode.to_le(); }
+pub fn ext4_inode_set_mode(sb: *mut Ext4Superblock, inode: *mut Ext4Inode, mode: u32) {
+    // sb参数在此函数中未使用，但为了与C API一致性保留
+    let _ = sb;
+    unsafe { (*inode).mode = (mode as u16).to_le(); }
 }
 
 /// 获取 inode 块数
-pub fn ext4_inode_get_blocks_count(inode: *const Ext4Inode) -> u32 {
-    unsafe { u32::from_le((*inode).blocks_count_lo) }
+pub fn ext4_inode_get_blocks_count(sb: *const Ext4Superblock, inode: *const Ext4Inode) -> u64 {
+    // sb参数在此函数中未使用，但为了与C API一致性保留
+    let _ = sb;
+    unsafe { u32::from_le((*inode).blocks_count_lo) as u64 }
 }
 
 /// 设置 inode 删除时间
 pub fn ext4_inode_set_del_time(inode: *mut Ext4Inode, time: u32) {
-    unsafe { (*inode).dtime = time.to_le(); }
+    unsafe { (*inode).deletion_time = time.to_le(); }
 }
 
 /// 清除 inode 标志
@@ -87,19 +95,24 @@ pub fn ext4_fs_inode_blocks_init(fs: *mut Ext4Filesystem, inode_ref: *mut Ext4In
     debug!("ext4_fs_inode_blocks_init");
 }
 
-/// 获取 inode 的第 idx 个数据块号（占位实现）
+/// 获取 inode 的第 iblock 个数据块号（占位实现）
 pub fn ext4_fs_get_inode_dblk_idx(
     inode_ref: *mut Ext4InodeRef,
-    idx: u64,
-    fblock: *mut u64,
+    iblock: u32,           // ext4_lblk_t
+    fblock: *mut u64,      // ext4_fsblk_t*
+    support_unwritten: bool,
 ) -> i32 {
     // TODO: 实现块映射逻辑（extent 或传统间接块）
-    debug!("ext4_fs_get_inode_dblk_idx: idx={}", idx);
+    debug!("ext4_fs_get_inode_dblk_idx: iblock={}, support_unwritten={}", iblock, support_unwritten);
     EOK
 }
 
 /// 为 inode 追加数据块（占位实现）
-pub fn ext4_fs_append_inode_dblk(inode_ref: *mut Ext4InodeRef, fblock: *mut u64) -> i32 {
+pub fn ext4_fs_append_inode_dblk(
+    inode_ref: *mut Ext4InodeRef,
+    fblock: *mut u64,      // ext4_fsblk_t*
+    iblock: *mut u32,      // ext4_lblk_t*
+) -> i32 {
     // TODO: 实现块分配和追加
     debug!("ext4_fs_append_inode_dblk");
     EOK

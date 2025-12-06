@@ -5,16 +5,16 @@ use core::{
     mem, ptr, slice,
 };
 
-use crate::{Ext4Result, error::Context, ffi::*};
+use crate::{error::Context, ffi::*, Ext4Result};
 use alloc::boxed::Box;
-
+// use lwext4_core::*;
 /// 设备的物理块大小（固定为512字节，与ext4规范一致）
 pub const EXT4_DEV_BSIZE: usize = 512;
 
 /// 块设备接口，定义了块设备的基本操作
 /// 这些是暴露给使用本crate的项目的接口， 如在arceos中， 需要有一个实现了blockdevice trait的bd结构体， 在其中调用arceos块设备驱动的方法与磁盘交互，进行磁盘块的读写
 /// ext4filesystem对象需要持有一个fs和一个bd（block device） ，当需要从磁盘读取数据时就会调用bd的blockdevice trait中的方法读写磁盘
-/// 可以知道，本crate的使用方只需为...TODO 
+/// 可以知道，本crate的使用方只需为...TODO
 pub trait BlockDevice {
     /// 向设备写入块（从block_id开始，写入buf中的数据）
     fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> Ext4Result<usize>;
@@ -26,20 +26,19 @@ pub trait BlockDevice {
     fn num_blocks(&self) -> Ext4Result<u64>;
 }
 
-
 /// 资源守卫：管理块设备相关资源的生命周期（确保安全释放）
 #[allow(dead_code)]
 struct ResourceGuard<Dev> {
-    dev: Box<Dev>, // 底层块设备实例
-    block_buf: Box<[u8; EXT4_DEV_BSIZE]>, // 块缓冲区
-    block_cache_buf: Box<ext4_bcache>, // 块缓存
+    dev: Box<Dev>,                             // 底层块设备实例
+    block_buf: Box<[u8; EXT4_DEV_BSIZE]>,      // 块缓冲区
+    block_cache_buf: Box<ext4_bcache>,         // 块缓存
     block_dev_iface: Box<ext4_blockdev_iface>, // 块设备接口（C兼容）
 }
 
 /// ext4块设备包装器，适配C接口的块设备实现
 pub struct Ext4BlockDevice<Dev: BlockDevice> {
     pub(crate) inner: Box<ext4_blockdev>, // 底层C结构体
-    _guard: ResourceGuard<Dev>, // 资源守卫（管理生命周期）
+    _guard: ResourceGuard<Dev>,           // 资源守卫（管理生命周期）
 }
 
 impl<Dev: BlockDevice> Ext4BlockDevice<Dev> {
@@ -51,18 +50,18 @@ impl<Dev: BlockDevice> Ext4BlockDevice<Dev> {
         let mut block_buf = Box::new([0u8; EXT4_DEV_BSIZE]);
         // 初始化块设备接口（C函数指针）
         let mut block_dev_iface = Box::new(ext4_blockdev_iface {
-            open: Some(Self::dev_open), // 打开设备
-            bread: Some(Self::dev_bread), // 读块
-            bwrite: Some(Self::dev_bwrite), // 写块
-            close: Some(Self::dev_close), // 关闭设备
-            lock: None, // 未实现锁定
-            unlock: None, // 未实现解锁
-            ph_bsize: EXT4_DEV_BSIZE as u32, // 物理块大小
-            ph_bcnt: 0, // 总块数（后续初始化）
-            ph_bbuf: block_buf.as_mut_ptr(), // 块缓冲区指针
-            ph_refctr: 0, // 引用计数
-            bread_ctr: 0, // 读计数
-            bwrite_ctr: 0, // 写计数
+            open: Some(Self::dev_open),                    // 打开设备
+            bread: Some(Self::dev_bread),                  // 读块
+            bwrite: Some(Self::dev_bwrite),                // 写块
+            close: Some(Self::dev_close),                  // 关闭设备
+            lock: None,                                    // 未实现锁定
+            unlock: None,                                  // 未实现解锁
+            ph_bsize: EXT4_DEV_BSIZE as u32,               // 物理块大小
+            ph_bcnt: 0,                                    // 总块数（后续初始化）
+            ph_bbuf: block_buf.as_mut_ptr(),               // 块缓冲区指针
+            ph_refctr: 0,                                  // 引用计数
+            bread_ctr: 0,                                  // 读计数
+            bwrite_ctr: 0,                                 // 写计数
             p_user: dev.as_mut() as *mut _ as *mut c_void, // 底层设备指针
         });
 
@@ -70,15 +69,17 @@ impl<Dev: BlockDevice> Ext4BlockDevice<Dev> {
         let mut block_cache_buf: Box<ext4_bcache> = Box::new(unsafe { mem::zeroed() });
         // 初始化块设备结构体
         let mut blockdev = Box::new(ext4_blockdev {
-            bdif: block_dev_iface.as_mut(), // 块设备接口
-            part_offset: 0, // 分区偏移
-            part_size: 0, // 分区大小
-            bc: block_cache_buf.as_mut(), // 块缓存
-            lg_bsize: 0, // 逻辑块大小（后续设置）
-            lg_bcnt: 0, // 逻辑块数（后续设置）
-            cache_write_back: 0, // 缓存写回模式
-            fs: ptr::null_mut(), // 关联的文件系统（后续设置）
-            journal: ptr::null_mut(), // 日志（未使用）
+            bdif: block_dev_iface.as_mut(),  // 块设备接口
+            part_offset: 0,                  // 分区偏移
+            part_size: 0,                    // 分区大小
+            bc: block_cache_buf.as_mut(),    // 块缓存
+            lg_bsize: 0,                     // 逻辑块大小（后续设置）
+            lg_bcnt: 0,                      // 逻辑块数（后续设置）
+            cache_write_back: 0,             // 缓存写回模式
+            fs: ptr::null_mut(),             // 关联的文件系统（后续设置）
+            journal: ptr::null_mut(),        // 日志（未使用）
+            ph_bsize: EXT4_DEV_BSIZE as u32, // 物理块大小
+            ph_bcnt: 0,                      // 物理块数（后续设置）
         });
 
         unsafe {

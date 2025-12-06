@@ -1,5 +1,5 @@
-   0.038034263s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("lwext4_arce", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/src/lib.rs", Edition2021) }
-   0.038138301s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/target/debug/.fingerprint/lwext4_arce-4da2020220d9f59f/lib-lwext4_arce`
+   0.014762624s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)/Check { test: false }/TargetInner { name_inferred: true, ..: lib_target("lwext4_arce", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/src/lib.rs", Edition2021) }
+   0.014782648s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/target/debug/.fingerprint/lwext4_arce-4da2020220d9f59f/lib-lwext4_arce`
 
 Caused by:
     No such file or directory (os error 2)
@@ -43,8 +43,8 @@ Stack backtrace:
   25: __libc_start_main_impl
              at ./csu/../csu/libc-start.c:360:3
   26: <unknown>
-   0.228889291s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("lwext4_arce", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/src/lib.rs", Edition2021) }
-   0.228909085s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/target/debug/.fingerprint/lwext4_arce-0f63c248fdbde83d/test-lib-lwext4_arce`
+   0.069147751s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint: fingerprint error for lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)/Check { test: true }/TargetInner { name_inferred: true, ..: lib_target("lwext4_arce", ["lib"], "/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/src/lib.rs", Edition2021) }
+   0.069162078s  INFO prepare_target{force=false package_id=lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce) target="lwext4_arce"}: cargo::core::compiler::fingerprint:     err: failed to read `/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce/target/debug/.fingerprint/lwext4_arce-0f63c248fdbde83d/test-lib-lwext4_arce`
 
 Caused by:
     No such file or directory (os error 2)
@@ -89,6 +89,6 @@ Stack backtrace:
              at ./csu/../csu/libc-start.c:360:3
   26: <unknown>
     Checking lwext4_arce v0.1.0 (/home/c20h30o2/files/lwext4-rust/lwext4-rust/lwext4_arce)
-error: could not compile `lwext4_arce` (lib) due to 107 previous errors; 8 warnings emitted
+error: could not compile `lwext4_arce` (lib) due to 107 previous errors; 9 warnings emitted
 warning: build failed, waiting for other jobs to finish...
-error: could not compile `lwext4_arce` (lib test) due to 107 previous errors; 8 warnings emitted
+error: could not compile `lwext4_arce` (lib test) due to 107 previous errors; 9 warnings emitted

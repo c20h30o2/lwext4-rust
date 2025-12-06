@@ -19,20 +19,20 @@ pub const EXT4_INODE_BLOCKS: usize = 15;
 pub const EXT4_INODE_DIRECT_BLOCKS: usize = 12;
 
 /// 块设备缓存大小（缓存的块数量）
-pub const CONFIG_BLOCK_DEV_CACHE_SIZE: usize = 8;
+pub const CONFIG_BLOCK_DEV_CACHE_SIZE: u32 = 8;
 
 /// Inode flags: 使用 extent 树
 pub const EXT4_INODE_FLAG_EXTENTS: u32 = 0x80000;
 
 /// 目录项类型常量
-pub const EXT4_DE_UNKNOWN: u8 = 0;
-pub const EXT4_DE_REG_FILE: u8 = 1;
-pub const EXT4_DE_DIR: u8 = 2;
-pub const EXT4_DE_CHRDEV: u8 = 3;
-pub const EXT4_DE_BLKDEV: u8 = 4;
-pub const EXT4_DE_FIFO: u8 = 5;
-pub const EXT4_DE_SOCK: u8 = 6;
-pub const EXT4_DE_SYMLINK: u8 = 7;
+pub const EXT4_DE_UNKNOWN: u32 = 0;
+pub const EXT4_DE_REG_FILE: u32 = 1;
+pub const EXT4_DE_DIR: u32 = 2;
+pub const EXT4_DE_CHRDEV: u32 = 3;
+pub const EXT4_DE_BLKDEV: u32 = 4;
+pub const EXT4_DE_FIFO: u32 = 5;
+pub const EXT4_DE_SOCK: u32 = 6;
+pub const EXT4_DE_SYMLINK: u32 = 7;
 
 /// 错误码（兼容 C errno）
 pub const EOK: i32 = 0;

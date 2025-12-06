@@ -144,11 +144,12 @@ impl RawDirEntry {
         let mut name_len = self.inner.name_len as u16;
         // 处理旧版本的ext4（名称长度可能存储在高位）
         if revision_tuple(sb) < (0, 5) {
-            let high = unsafe { self.inner.in_.name_length_high };
+            let high = self.inner.in_.name_length_high();  // 方法调用
             name_len |= (high as u16) << 8;
         }
         // 从原始数据中提取名称
-        unsafe { slice::from_raw_parts(self.inner.name.as_ptr(), name_len as usize) }
+        let name_slice = self.inner.name();  // 方法调用获取&[u8]
+        &name_slice[..name_len as usize]
     }
 
     /// 获取条目对应的inode类型
@@ -158,7 +159,7 @@ impl RawDirEntry {
             InodeType::Unknown
         } else {
             // 转换C类型值为InodeType
-            match unsafe { self.inner.in_.inode_type } as u32 {
+            match self.inner.in_.inode_type() as u32 {  // 方法调用
                 EXT4_DE_DIR => InodeType::Directory,
                 EXT4_DE_REG_FILE => InodeType::RegularFile,
                 EXT4_DE_SYMLINK => InodeType::Symlink,

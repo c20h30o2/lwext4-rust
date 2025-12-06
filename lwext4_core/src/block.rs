@@ -1,7 +1,7 @@
 //! 块操作模块
 
 use log::debug;
-use crate::{Ext4Result, Ext4Error, Ext4BlockDevice, BlockDevice};
+use crate::{Ext4Result, Ext4Error, Ext4BlockDevice, Ext4BlockCache, BlockDevice};
 use crate::consts::*;
 
 /// 初始化块设备（占位实现）
@@ -52,7 +52,7 @@ pub fn ext4_block_cache_flush(bdev: *mut Ext4BlockDevice) -> i32 {
 }
 
 /// 绑定块缓存（占位实现）
-pub fn ext4_block_bind_bcache(bdev: *mut Ext4BlockDevice, bc: *mut u8) -> i32 {
+pub fn ext4_block_bind_bcache(bdev: *mut Ext4BlockDevice, bc: *mut Ext4BlockCache) -> i32 {
     debug!("ext4_block_bind_bcache");
     EOK
 }
@@ -72,29 +72,48 @@ pub fn ext4_block_cache_write_back(bdev: *mut Ext4BlockDevice, enable: i32) -> i
 }
 
 /// 初始化动态块缓存（占位实现）
-pub fn ext4_bcache_init_dynamic(bc: *mut u8, cnt: u32, itemsize: u32) -> i32 {
+pub fn ext4_bcache_init_dynamic(bc: *mut Ext4BlockCache, cnt: u32, itemsize: u32) -> i32 {
     debug!("ext4_bcache_init_dynamic: cnt={}, itemsize={}", cnt, itemsize);
+    unsafe {
+        if !bc.is_null() {
+            (*bc).cnt = cnt;
+            (*bc).itemsize = itemsize;
+        }
+    }
     EOK
 }
 
 /// 销毁动态块缓存（占位实现）
-pub fn ext4_bcache_fini_dynamic(bc: *mut u8) -> i32 {
+pub fn ext4_bcache_fini_dynamic(bc: *mut Ext4BlockCache) -> i32 {
     debug!("ext4_bcache_fini_dynamic");
     EOK
 }
 
 /// 清理块缓存（占位实现）
-pub fn ext4_bcache_cleanup(bc: *mut u8) {
+pub fn ext4_bcache_cleanup(bc: *mut Ext4BlockCache) {
     debug!("ext4_bcache_cleanup");
 }
 
-/// 获取直接块号（占位实现）
-pub fn ext4_blocks_get_direct(inode: *mut u8, idx: u32) -> u32 {
-    debug!("ext4_blocks_get_direct: idx={}", idx);
-    0  // TODO: 返回实际块号
+/// 从块设备直接读取块数据（占位实现）
+pub fn ext4_blocks_get_direct(
+    bdev: *mut Ext4BlockDevice,
+    buf: *mut core::ffi::c_void,
+    lba: u64,
+    cnt: u32,
+) -> i32 {
+    debug!("ext4_blocks_get_direct: lba={}, cnt={}", lba, cnt);
+    // TODO: 实现从块设备读取数据
+    EOK
 }
 
-/// 设置直接块号（占位实现）
-pub fn ext4_blocks_set_direct(inode: *mut u8, idx: u32, block: u32) {
-    debug!("ext4_blocks_set_direct: idx={}, block={}", idx, block);
+/// 向块设备直接写入块数据（占位实现）
+pub fn ext4_blocks_set_direct(
+    bdev: *mut Ext4BlockDevice,
+    buf: *const core::ffi::c_void,
+    lba: u64,
+    cnt: u32,
+) -> i32 {
+    debug!("ext4_blocks_set_direct: lba={}, cnt={}", lba, cnt);
+    // TODO: 实现向块设备写入数据
+    EOK
 }

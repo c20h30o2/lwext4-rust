@@ -7,7 +7,11 @@ edition = "2021"
 default = ["use-ffi"]
 use-ffi = []           # 使用原始 C FFI（build.rs + bindgen）
 use-rust = ["dep:lwext4_core"]  # 使用纯 Rust 实现
+# use-rust = []  # 使用纯 Rust 实现
+
 
 [dependencies]
 log = "0.4"
+
+# lwext4_core = { path = "../lwext4_core", version = "0.1.0" }
 lwext4_core = { path = "../lwext4_core", optional = true }

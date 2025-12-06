@@ -34,7 +34,8 @@ pub fn ext4_fs_fini(fs: *mut Ext4Filesystem) -> i32 {
 /// 初始化 inode 数据块索引（占位实现）
 pub fn ext4_fs_init_inode_dblk_idx(
     inode_ref: *mut crate::Ext4InodeRef,
-    iblock: u64,
+    iblock: u32,           // ext4_lblk_t
+    fblock: *mut u64,      // ext4_fsblk_t*
 ) -> i32 {
     debug!("ext4_fs_init_inode_dblk_idx: iblock={}", iblock);
     EOK

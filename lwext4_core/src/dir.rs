@@ -1,15 +1,15 @@
 //! 目录操作模块
 
 use log::debug;
-use crate::{Ext4InodeRef, Ext4DirIterator, Ext4DirEntry};
+use crate::{Ext4InodeRef, Ext4DirIterator, Ext4DirEntry, Ext4DirSearchResult};
 use crate::consts::*;
 
 /// 查找目录项（占位实现）
 pub fn ext4_dir_find_entry(
+    result: *mut Ext4DirSearchResult,
     parent: *mut Ext4InodeRef,
     name: *const u8,
     name_len: u32,
-    result: *mut *mut Ext4DirEntry,
 ) -> i32 {
     // TODO: 实现目录项查找
     // 1. 遍历父目录的数据块
@@ -68,6 +68,10 @@ pub fn ext4_dir_iterator_fini(it: *mut Ext4DirIterator) -> i32 {
 }
 
 /// 销毁查找结果（占位实现）
-pub fn ext4_dir_destroy_result(result: *mut Ext4DirEntry) {
+pub fn ext4_dir_destroy_result(
+    parent: *mut Ext4InodeRef,
+    result: *mut Ext4DirSearchResult,
+) {
     debug!("ext4_dir_destroy_result");
+    // TODO: 释放查找结果占用的资源
 }
