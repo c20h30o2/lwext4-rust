@@ -1,0 +1,22 @@
+run test:
+
+运行所有测试
+
+cd lwext4_arce
+cargo test --no-default-features --features use-rust
+
+运行特定测试
+
+cd lwext4_arce
+cargo test --no-default-features --features use-rust test_open_filesystem
+
+显示测试输出
+
+cd lwext4_arce
+cargo test --no-default-features --features use-rust -- --nocapture
+
+
+
+cargo check --no-default-features --features "use-rust" 2>&1 | grep "^error" | wc -l 
+
+cargo build --no-default-features --features use-rust

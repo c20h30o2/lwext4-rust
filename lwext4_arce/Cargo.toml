@@ -15,3 +15,6 @@ log = "0.4"
 
 # lwext4_core = { path = "../lwext4_core", version = "0.1.0" }
 lwext4_core = { path = "../lwext4_core", optional = true }
+
+[dev-dependencies]
+libc = "0.2"
