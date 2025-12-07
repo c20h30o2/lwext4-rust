@@ -1,229 +1,291 @@
 //! 块操作模块
+//!
+//! 提供块设备的读写操作和缓存管理
 
 use crate::consts::*;
-use crate::{BlockDevice, Ext4BlockCache, Ext4BlockDevice, Ext4Error, Ext4Result};
+use crate::types::Ext4BlockDev;
+use crate::{BlockDevice, Ext4Error, Ext4Result};
 use log::debug;
 
-/// 锁定块设备接口
-///
-/// 如果块设备接口提供了 lock 回调，则调用它。
-/// 这用于在多线程环境中保护块设备访问。
-pub fn ext4_bdif_lock(bdev: *mut Ext4BlockDevice) {
-    unsafe {
-        // 检查 lock 函数指针是否存在
-        if (*(*bdev).bdif).lock.is_none() {
-            return;
+/// 块设备操作实现
+impl<D: BlockDevice> Ext4BlockDev<D> {
+    /// 直接从块设备读取块
+    ///
+    /// # 参数
+    ///
+    /// * `lba` - 逻辑块地址
+    /// * `buf` - 目标缓冲区
+    ///
+    /// # 返回
+    ///
+    /// 成功返回读取的字节数
+    ///
+    /// # 对应 C 函数
+    ///
+    /// `ext4_blocks_get_direct`
+    pub fn ext4_blocks_get_direct(&mut self, lba: u64, buf: &mut [u8]) -> Ext4Result<usize> {
+        // 计算物理块地址
+        let pba = (lba * self.lg_bsize() as u64 + self.part_offset()) / self.ph_bsize() as u64;
+        let pb_cnt = (self.lg_bsize() / self.ph_bsize()) as u32;
+
+        // 检查缓冲区大小
+        let required_size = (pb_cnt * self.ph_bsize()) as usize;
+        if buf.len() < required_size {
+            return Err(Ext4Error::new(EINVAL, "buffer too small"));
         }
 
-        // 调用 lock 函数
-        if let Some(lock_fn) = (*(*bdev).bdif).lock {
-            let r = lock_fn(bdev);
-            debug_assert_eq!(r, EOK, "ext4_bdif_lock failed with error: {}", r);
+        // 增加读取计数
+        self.inc_bread_ctr();
+
+        // 调用底层设备读取
+        self.device_mut().read_blocks(pba, pb_cnt, buf)
+    }
+
+    /// 直接向块设备写入块
+    ///
+    /// # 参数
+    ///
+    /// * `lba` - 逻辑块地址
+    /// * `buf` - 源数据缓冲区
+    ///
+    /// # 返回
+    ///
+    /// 成功返回写入的字节数
+    ///
+    /// # 对应 C 函数
+    ///
+    /// `ext4_blocks_set_direct`
+    pub fn ext4_blocks_set_direct(&mut self, lba: u64, buf: &[u8]) -> Ext4Result<usize> {
+        // 计算物理块地址
+        let pba = (lba * self.lg_bsize() as u64 + self.part_offset()) / self.ph_bsize() as u64;
+        let pb_cnt = (self.lg_bsize() / self.ph_bsize()) as u32;
+
+        // 检查缓冲区大小
+        let required_size = (pb_cnt * self.ph_bsize()) as usize;
+        if buf.len() < required_size {
+            return Err(Ext4Error::new(EINVAL, "buffer too small"));
         }
+
+        // 增加写入计数
+        self.inc_bwrite_ctr();
+
+        // 调用底层设备写入
+        self.device_mut().write_blocks(pba, pb_cnt, buf)
+    }
+
+    /// 按字节偏移读取数据
+    ///
+    /// 支持跨块读取，自动处理块边界
+    ///
+    /// # 参数
+    ///
+    /// * `offset` - 字节偏移量
+    /// * `buf` - 目标缓冲区
+    ///
+    /// # 返回
+    ///
+    /// 成功返回读取的字节数
+    ///
+    /// # 对应 C 函数
+    ///
+    /// `ext4_block_readbytes`
+    pub fn ext4_block_readbytes(&mut self, offset: u64, buf: &mut [u8]) -> Ext4Result<usize> {
+        let len = buf.len();
+        let lg_bsize = self.lg_bsize() as u64;
+
+        // 计算起始块号和块内偏移
+        let start_block = offset / lg_bsize;
+        let block_offset = (offset % lg_bsize) as usize;
+
+        // 计算需要读取的块数
+        let total_size = block_offset + len;
+        let block_count = ((total_size + lg_bsize as usize - 1) / lg_bsize as usize) as u64;
+
+        // 分配临时缓冲区
+        let mut temp_buf = alloc::vec![0u8; (block_count * lg_bsize) as usize];
+
+        // 读取所有相关块
+        for i in 0..block_count {
+            let lba = start_block + i;
+            let block_buf = &mut temp_buf[(i * lg_bsize) as usize..((i + 1) * lg_bsize) as usize];
+            self.ext4_blocks_get_direct(lba, block_buf)?;
+        }
+
+        // 复制所需字节到目标缓冲区
+        buf.copy_from_slice(&temp_buf[block_offset..block_offset + len]);
+
+        Ok(len)
+    }
+
+    /// 按字节偏移写入数据
+    ///
+    /// 支持跨块写入，自动处理块边界
+    ///
+    /// # 参数
+    ///
+    /// * `offset` - 字节偏移量
+    /// * `buf` - 源数据缓冲区
+    ///
+    /// # 返回
+    ///
+    /// 成功返回写入的字节数
+    ///
+    /// # 对应 C 函数
+    ///
+    /// `ext4_block_writebytes`
+    pub fn ext4_block_writebytes(&mut self, offset: u64, buf: &[u8]) -> Ext4Result<usize> {
+        let len = buf.len();
+        let lg_bsize = self.lg_bsize() as u64;
+
+        // 计算起始块号和块内偏移
+        let start_block = offset / lg_bsize;
+        let block_offset = (offset % lg_bsize) as usize;
+
+        // 计算需要写入的块数
+        let total_size = block_offset + len;
+        let block_count = ((total_size + lg_bsize as usize - 1) / lg_bsize as usize) as u64;
+
+        // 分配临时缓冲区
+        let mut temp_buf = alloc::vec![0u8; (block_count * lg_bsize) as usize];
+
+        // 如果写入不是块对齐的，需要先读取现有数据
+        if block_offset != 0 || len % lg_bsize as usize != 0 {
+            for i in 0..block_count {
+                let lba = start_block + i;
+                let block_buf = &mut temp_buf[(i * lg_bsize) as usize..((i + 1) * lg_bsize) as usize];
+                // 忽略读取错误（可能是新块）
+                let _ = self.ext4_blocks_get_direct(lba, block_buf);
+            }
+        }
+
+        // 将数据写入临时缓冲区
+        temp_buf[block_offset..block_offset + len].copy_from_slice(buf);
+
+        // 写回所有相关块
+        for i in 0..block_count {
+            let lba = start_block + i;
+            let block_buf = &temp_buf[(i * lg_bsize) as usize..((i + 1) * lg_bsize) as usize];
+            self.ext4_blocks_set_direct(lba, block_buf)?;
+        }
+
+        Ok(len)
+    }
+
+    /// 刷新缓存到设备
+    ///
+    /// # 对应 C 函数
+    ///
+    /// `ext4_block_cache_flush`
+    pub fn ext4_block_cache_flush(&mut self) -> Ext4Result<()> {
+        debug!("ext4_block_cache_flush");
+        self.device_mut().flush()
     }
 }
 
-/// 解锁块设备接口
-///
-/// 如果块设备接口提供了 unlock 回调，则调用它。
-pub fn ext4_bdif_unlock(bdev: *mut Ext4BlockDevice) {
-    unsafe {
-        // 检查 unlock 函数指针是否存在
-        if (*(*bdev).bdif).unlock.is_none() {
-            return;
-        }
+//=============================================================================
+// 自由函数形式的 API（保持 C 风格命名以便对照实现）
+//=============================================================================
 
-        // 调用 unlock 函数
-        if let Some(unlock_fn) = (*(*bdev).bdif).unlock {
-            let r = unlock_fn(bdev);
-            debug_assert_eq!(r, EOK, "ext4_bdif_unlock failed with error: {}", r);
-        }
-    }
+/// 直接从块设备读取块（自由函数形式）
+///
+/// # 对应 C 函数
+///
+/// `ext4_blocks_get_direct`
+pub fn ext4_blocks_get_direct<D: BlockDevice>(
+    bdev: &mut Ext4BlockDev<D>,
+    lba: u64,
+    buf: &mut [u8],
+) -> Ext4Result<usize> {
+    bdev.ext4_blocks_get_direct(lba, buf)
+}
+
+/// 直接向块设备写入块（自由函数形式）
+///
+/// # 对应 C 函数
+///
+/// `ext4_blocks_set_direct`
+pub fn ext4_blocks_set_direct<D: BlockDevice>(
+    bdev: &mut Ext4BlockDev<D>,
+    lba: u64,
+    buf: &[u8],
+) -> Ext4Result<usize> {
+    bdev.ext4_blocks_set_direct(lba, buf)
+}
+
+/// 按字节偏移读取数据（自由函数形式）
+///
+/// # 对应 C 函数
+///
+/// `ext4_block_readbytes`
+pub fn ext4_block_readbytes<D: BlockDevice>(
+    bdev: &mut Ext4BlockDev<D>,
+    offset: u64,
+    buf: &mut [u8],
+) -> Ext4Result<usize> {
+    bdev.ext4_block_readbytes(offset, buf)
+}
+
+/// 按字节偏移写入数据（自由函数形式）
+///
+/// # 对应 C 函数
+///
+/// `ext4_block_writebytes`
+pub fn ext4_block_writebytes<D: BlockDevice>(
+    bdev: &mut Ext4BlockDev<D>,
+    offset: u64,
+    buf: &[u8],
+) -> Ext4Result<usize> {
+    bdev.ext4_block_writebytes(offset, buf)
+}
+
+/// 刷新块缓存（自由函数形式）
+///
+/// # 对应 C 函数
+///
+/// `ext4_block_cache_flush`
+pub fn ext4_block_cache_flush<D: BlockDevice>(bdev: &mut Ext4BlockDev<D>) -> Ext4Result<()> {
+    bdev.ext4_block_cache_flush()
 }
 
 /// 初始化块设备（占位实现）
-pub fn ext4_block_init(bdev: *mut Ext4BlockDevice) -> i32 {
-    // TODO: 初始化块设备
+///
+/// # 对应 C 函数
+///
+/// `ext4_block_init`
+pub fn ext4_block_init<D: BlockDevice>(_bdev: &mut Ext4BlockDev<D>) -> Ext4Result<()> {
     debug!("ext4_block_init");
-    EOK
+    Ok(())
 }
 
 /// 关闭块设备（占位实现）
-pub fn ext4_block_fini(bdev: *mut Ext4BlockDevice) -> i32 {
+///
+/// # 对应 C 函数
+///
+/// `ext4_block_fini`
+pub fn ext4_block_fini<D: BlockDevice>(_bdev: &mut Ext4BlockDev<D>) -> Ext4Result<()> {
     debug!("ext4_block_fini");
-    EOK
-}
-
-/// 读取字节（占位实现）
-pub fn ext4_block_readbytes(
-    bdev: *mut Ext4BlockDevice,
-    offset: u64,
-    buf: *mut u8,
-    len: usize,
-) -> i32 {
-    // TODO: 实现字节读取
-    // 1. 计算起始块号
-    // 2. 读取跨越的所有块
-    // 3. 复制所需字节到 buf
-        debug!("ext4_block_readbytes: offset={}, len={}", offset, len);
-        EOK
-    
-}
-
-/// 写入字节（占位实现）
-pub fn ext4_block_writebytes(
-    bdev: *mut Ext4BlockDevice,
-    offset: u64,
-    buf: *const u8,
-    len: usize,
-) -> i32 {
-    // TODO: 实现字节写入
-    debug!("ext4_block_writebytes: offset={}, len={}", offset, len);
-    EOK
-}
-
-/// 刷新块缓存（占位实现）
-pub fn ext4_block_cache_flush(bdev: *mut Ext4BlockDevice) -> i32 {
-    debug!("ext4_block_cache_flush");
-    EOK
-}
-
-/// 绑定块缓存（占位实现）
-pub fn ext4_block_bind_bcache(bdev: *mut Ext4BlockDevice, bc: *mut Ext4BlockCache) -> i32 {
-    debug!("ext4_block_bind_bcache");
-    EOK
+    Ok(())
 }
 
 /// 设置逻辑块大小（占位实现）
-pub fn ext4_block_set_lb_size(bdev: *mut Ext4BlockDevice, lb_size: u32) {
-    unsafe {
-        (*bdev).lg_bsize = lb_size;
-    }
+///
+/// # 对应 C 函数
+///
+/// `ext4_block_set_lb_size`
+pub fn ext4_block_set_lb_size<D: BlockDevice>(_bdev: &mut Ext4BlockDev<D>, lb_size: u32) {
     debug!("ext4_block_set_lb_size: {}", lb_size);
+    // TODO: 实现设置逻辑块大小
 }
 
 /// 启用/禁用块缓存写回模式（占位实现）
-pub fn ext4_block_cache_write_back(bdev: *mut Ext4BlockDevice, enable: i32) -> i32 {
+///
+/// # 对应 C 函数
+///
+/// `ext4_block_cache_write_back`
+pub fn ext4_block_cache_write_back<D: BlockDevice>(
+    _bdev: &mut Ext4BlockDev<D>,
+    enable: bool,
+) -> Ext4Result<()> {
     debug!("ext4_block_cache_write_back: enable={}", enable);
-    EOK
-}
-
-/// 初始化动态块缓存（占位实现）
-pub fn ext4_bcache_init_dynamic(bc: *mut Ext4BlockCache, cnt: u32, itemsize: u32) -> i32 {
-    debug!(
-        "ext4_bcache_init_dynamic: cnt={}, itemsize={}",
-        cnt, itemsize
-    );
-    unsafe {
-        if !bc.is_null() {
-            (*bc).cnt = cnt;
-            (*bc).itemsize = itemsize;
-        }
-    }
-    EOK
-}
-
-/// 销毁动态块缓存（占位实现）
-pub fn ext4_bcache_fini_dynamic(bc: *mut Ext4BlockCache) -> i32 {
-    debug!("ext4_bcache_fini_dynamic");
-    EOK
-}
-
-/// 清理块缓存（占位实现）
-pub fn ext4_bcache_cleanup(bc: *mut Ext4BlockCache) {
-    debug!("ext4_bcache_cleanup");
-}
-
-/// 底层块读取（带锁）
-fn ext4_bdif_bread(
-    bdev: *mut Ext4BlockDevice,
-    buf: *mut core::ffi::c_void,
-    blk_id: u64,
-    blk_cnt: u32,
-) -> i32 {
-    unsafe {
-        ext4_bdif_lock(bdev);
-
-        let bread_fn = (*(*bdev).bdif).bread;
-        let r = if let Some(bread) = bread_fn {
-            bread(bdev, buf, blk_id, blk_cnt)
-        } else {
-            ENOTSUP
-        };
-
-        (*(*bdev).bdif).bread_ctr += 1;
-        ext4_bdif_unlock(bdev);
-        r
-    }
-}
-
-/// 底层块写入（带锁）
-fn ext4_bdif_bwrite(
-    bdev: *mut Ext4BlockDevice,
-    buf: *const core::ffi::c_void,
-    blk_id: u64,
-    blk_cnt: u32,
-) -> i32 {
-    unsafe {
-        ext4_bdif_lock(bdev);
-
-        let bwrite_fn = (*(*bdev).bdif).bwrite;
-        let r = if let Some(bwrite) = bwrite_fn {
-            bwrite(bdev, buf, blk_id, blk_cnt)
-        } else {
-            ENOTSUP
-        };
-
-        (*(*bdev).bdif).bwrite_ctr += 1;
-        ext4_bdif_unlock(bdev);
-        r
-    }
-}
-
-/// 从块设备直接读取块数据
-///
-/// 将逻辑块地址转换为物理块地址并读取数据
-pub fn ext4_blocks_get_direct(
-    bdev: *mut Ext4BlockDevice,
-    buf: *mut core::ffi::c_void,
-    lba: u64,
-    cnt: u32,
-) -> i32 {
-    unsafe {
-        debug_assert!(!bdev.is_null() && !buf.is_null());
-
-        let lg_bsize = (*bdev).lg_bsize as u64;
-        let ph_bsize = (*(*bdev).bdif).ph_bsize as u64;
-        let part_offset = (*bdev).part_offset;
-
-        // 计算物理块地址
-        let pba = (lba * lg_bsize + part_offset) / ph_bsize;
-        let pb_cnt = (lg_bsize / ph_bsize) as u32;
-
-        ext4_bdif_bread(bdev, buf, pba, pb_cnt * cnt)
-    }
-}
-
-/// 向块设备直接写入块数据
-///
-/// 将逻辑块地址转换为物理块地址并写入数据
-pub fn ext4_blocks_set_direct(
-    bdev: *mut Ext4BlockDevice,
-    buf: *const core::ffi::c_void,
-    lba: u64,
-    cnt: u32,
-) -> i32 {
-    unsafe {
-        debug_assert!(!bdev.is_null() && !buf.is_null());
-
-        let lg_bsize = (*bdev).lg_bsize as u64;
-        let ph_bsize = (*(*bdev).bdif).ph_bsize as u64;
-        let part_offset = (*bdev).part_offset;
-
-        // 计算物理块地址
-        let pba = (lba * lg_bsize + part_offset) / ph_bsize;
-        let pb_cnt = (lg_bsize / ph_bsize) as u32;
-
-        ext4_bdif_bwrite(bdev, buf, pba, pb_cnt * cnt)
-    }
+    Ok(())
 }

@@ -22,7 +22,7 @@ pub mod fs;
 pub use consts::*;
 pub use error::{Ext4Error, Ext4Result};
 pub use traits::BlockDevice;
-pub use types::*;
+pub use types::{Ext4BlockDev, Ext4BCache, *};
 
 // 重新导出所有API函数
 pub use fs::*;
