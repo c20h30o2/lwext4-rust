@@ -71,9 +71,11 @@ pub mod inode;
 /// Extent 树操作
 pub mod extent;
 
+/// 目录操作
+pub mod dir;
+
 // 待实现的模块
 // pub mod fs;
-// pub mod dir;
 
 // ===== C API 兼容层（可选）=====
 
@@ -99,6 +101,9 @@ pub use inode::{Inode, read_inode};
 
 // Extent
 pub use extent::ExtentTree;
+
+// Dir
+pub use dir::{DirEntry, DirIterator, PathLookup, read_dir, lookup_path, get_inode_by_path};
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]
