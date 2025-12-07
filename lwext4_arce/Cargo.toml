@@ -4,10 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["use-ffi"]
-use-ffi = []           # 使用原始 C FFI（build.rs + bindgen）
-use-rust = ["dep:lwext4_core"]  # 使用纯 Rust 实现
-# use-rust = []  # 使用纯 Rust 实现
+default = ["use-rust"]
+use-ffi = []           # 使用原始 C FFI（build.rs + bindgen）- 已废弃
+use-rust = ["dep:lwext4_core"]  # 使用纯 Rust 实现（默认）
 
 
 [dependencies]
