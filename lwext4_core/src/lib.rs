@@ -37,6 +37,9 @@
 //!
 //! - [`error`] - 错误类型定义
 //! - [`block`] - 块设备抽象和 I/O 操作
+//! - [`consts`] - 常量定义
+//! - [`types`] - 数据结构定义
+//! - [`superblock`] - Superblock 操作
 //! - [`c_api`] - C API 兼容层（可选）
 
 #![no_std]
@@ -53,7 +56,16 @@ pub mod error;
 /// 块设备抽象
 pub mod block;
 
-// 暂时注释掉未实现的模块
+/// 常量定义
+pub mod consts;
+
+/// 数据结构定义
+pub mod types;
+
+/// Superblock 操作
+pub mod superblock;
+
+// 待实现的模块
 // pub mod fs;
 // pub mod inode;
 // pub mod dir;
@@ -73,6 +85,9 @@ pub use error::{Error, ErrorKind, Result};
 
 // 块设备
 pub use block::{BlockDevice, BlockDev};
+
+// Superblock
+pub use superblock::{Superblock, read_superblock};
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]
