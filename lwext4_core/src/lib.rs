@@ -68,6 +68,9 @@ pub mod superblock;
 /// Inode 操作
 pub mod inode;
 
+/// Extent 树操作
+pub mod extent;
+
 // 待实现的模块
 // pub mod fs;
 // pub mod dir;
@@ -93,6 +96,9 @@ pub use superblock::{Superblock, read_superblock};
 
 // Inode
 pub use inode::{Inode, read_inode};
+
+// Extent
+pub use extent::ExtentTree;
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]
