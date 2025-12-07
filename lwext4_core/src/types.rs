@@ -317,3 +317,139 @@ impl ext4_group_desc {
             | ((u32::from_le(self.inode_table_hi) as u64) << 32)
     }
 }
+
+//=============================================================================
+// Extent 相关结构
+//=============================================================================
+
+/// Extent 树头部
+///
+/// 对应 ext4 磁盘格式中的 ext4_extent_header
+/// 位于每个 extent 树节点的开头
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub struct ext4_extent_header {
+    pub magic: u16,      // 魔数 0xF30A
+    pub entries: u16,    // 当前节点中的有效 entry 数量
+    pub max: u16,        // 节点中最大 entry 数量
+    pub depth: u16,      // 树的深度，0 表示叶子节点
+    pub generation: u32, // generation ID
+}
+
+impl Default for ext4_extent_header {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_extent_header {
+    /// 检查魔数是否有效
+    pub fn is_valid(&self) -> bool {
+        u16::from_le(self.magic) == 0xF30A
+    }
+
+    /// 获取 entry 数量
+    pub fn entries_count(&self) -> u16 {
+        u16::from_le(self.entries)
+    }
+
+    /// 获取最大 entry 数量
+    pub fn max_entries(&self) -> u16 {
+        u16::from_le(self.max)
+    }
+
+    /// 获取深度
+    pub fn depth(&self) -> u16 {
+        u16::from_le(self.depth)
+    }
+
+    /// 是否是叶子节点
+    pub fn is_leaf(&self) -> bool {
+        self.depth() == 0
+    }
+}
+
+/// Extent 叶子节点
+///
+/// 对应 ext4 磁盘格式中的 ext4_extent
+/// 描述一段连续的物理块
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub struct ext4_extent {
+    pub block: u32,    // 逻辑块号（文件内偏移）
+    pub len: u16,      // extent 长度（块数）
+    pub start_hi: u16, // 物理块号高 16 位
+    pub start_lo: u32, // 物理块号低 32 位
+}
+
+impl Default for ext4_extent {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_extent {
+    /// 获取逻辑块号
+    pub fn logical_block(&self) -> u32 {
+        u32::from_le(self.block)
+    }
+
+    /// 获取 extent 长度（块数）
+    pub fn len(&self) -> u16 {
+        u16::from_le(self.len)
+    }
+
+    /// 获取物理块号（合并高低位）
+    pub fn physical_block(&self) -> u64 {
+        (u32::from_le(self.start_lo) as u64)
+            | ((u16::from_le(self.start_hi) as u64) << 32)
+    }
+
+    /// 检查 extent 是否初始化
+    /// 未初始化的 extent 长度高位为 1
+    pub fn is_initialized(&self) -> bool {
+        const EXT4_EXT_UNWRITTEN_MASK: u16 = 0x8000;
+        (u16::from_le(self.len) & EXT4_EXT_UNWRITTEN_MASK) == 0
+    }
+
+    /// 获取实际长度（去除初始化标志位）
+    pub fn actual_len(&self) -> u16 {
+        const EXT4_EXT_MAX_LEN: u16 = 0x7FFF;
+        u16::from_le(self.len) & EXT4_EXT_MAX_LEN
+    }
+}
+
+/// Extent 索引节点
+///
+/// 对应 ext4 磁盘格式中的 ext4_extent_idx
+/// 指向下一层的 extent 树节点
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub struct ext4_extent_idx {
+    pub block: u32,   // 逻辑块号（覆盖范围的起始）
+    pub leaf_lo: u32, // 指向的块号低 32 位
+    pub leaf_hi: u16, // 指向的块号高 16 位
+    pub unused: u16,  // 保留
+}
+
+impl Default for ext4_extent_idx {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_extent_idx {
+    /// 获取逻辑块号
+    pub fn logical_block(&self) -> u32 {
+        u32::from_le(self.block)
+    }
+
+    /// 获取指向的物理块号（合并高低位）
+    pub fn leaf_block(&self) -> u64 {
+        (u32::from_le(self.leaf_lo) as u64)
+            | ((u16::from_le(self.leaf_hi) as u64) << 32)
+    }
+}
