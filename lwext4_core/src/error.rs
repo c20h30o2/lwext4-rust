@@ -1,49 +1,65 @@
-//! 错误处理模块
+//! 错误类型定义
+//!
+//! 提供 ext4 文件系统操作的错误类型。
 
 use core::fmt;
-use crate::consts::*;
 
-/// ext4 错误类型
-#[derive(Debug, Clone)]
-pub struct Ext4Error {
-    pub code: i32,
-    pub message: Option<&'static str>,
+/// ext4 操作错误
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Error {
+    kind: ErrorKind,
+    message: &'static str,
 }
 
-impl Ext4Error {
-    pub fn new(code: i32, message: impl Into<Option<&'static str>>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-        }
+/// 错误类别
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    /// I/O 错误
+    Io,
+    /// 无效参数
+    InvalidInput,
+    /// 文件系统损坏
+    Corrupted,
+    /// 权限错误
+    PermissionDenied,
+    /// 文件不存在
+    NotFound,
+    /// 已存在
+    AlreadyExists,
+    /// 空间不足
+    NoSpace,
+    /// 不支持的操作
+    Unsupported,
+    /// 设备忙
+    Busy,
+}
+
+impl Error {
+    /// 创建新错误
+    pub const fn new(kind: ErrorKind, message: &'static str) -> Self {
+        Self { kind, message }
     }
 
-    pub fn from_code(code: i32) -> Self {
-        Self {
-            code,
-            message: None,
-        }
+    /// 获取错误类型
+    pub const fn kind(&self) -> ErrorKind {
+        self.kind
+    }
+
+    /// 获取错误消息
+    pub const fn message(&self) -> &'static str {
+        self.message
     }
 }
 
-impl fmt::Display for Ext4Error {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(msg) = self.message {
-            write!(f, "Ext4Error(code={}, msg={})", self.code, msg)
-        } else {
-            write!(f, "Ext4Error(code={})", self.code)
-        }
+        write!(f, "{:?}: {}", self.kind, self.message)
     }
 }
 
-/// ext4 Result 类型
-pub type Ext4Result<T> = Result<T, Ext4Error>;
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
-/// 辅助函数：检查返回码
-pub fn check_result(code: i32) -> Ext4Result<()> {
-    if code == EOK {
-        Ok(())
-    } else {
-        Err(Ext4Error::from_code(code))
-    }
-}
+/// Result 类型别名
+pub type Result<T> = core::result::Result<T, Error>;
