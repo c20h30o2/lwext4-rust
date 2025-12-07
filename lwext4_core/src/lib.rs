@@ -65,9 +65,11 @@ pub mod types;
 /// Superblock 操作
 pub mod superblock;
 
+/// Inode 操作
+pub mod inode;
+
 // 待实现的模块
 // pub mod fs;
-// pub mod inode;
 // pub mod dir;
 
 // ===== C API 兼容层（可选）=====
@@ -88,6 +90,9 @@ pub use block::{BlockDevice, BlockDev};
 
 // Superblock
 pub use superblock::{Superblock, read_superblock};
+
+// Inode
+pub use inode::{Inode, read_inode};
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]

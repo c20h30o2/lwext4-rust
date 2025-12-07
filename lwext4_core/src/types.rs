@@ -232,17 +232,17 @@ impl ext4_inode {
 
     /// 是否是目录
     pub fn is_dir(&self) -> bool {
-        (u16::from_le(self.mode) & EXT4_INODE_MODE_DIRECTORY) != 0
+        (u16::from_le(self.mode) & EXT4_INODE_MODE_TYPE_MASK) == EXT4_INODE_MODE_DIRECTORY
     }
 
     /// 是否是普通文件
     pub fn is_file(&self) -> bool {
-        (u16::from_le(self.mode) & EXT4_INODE_MODE_FILE) != 0
+        (u16::from_le(self.mode) & EXT4_INODE_MODE_TYPE_MASK) == EXT4_INODE_MODE_FILE
     }
 
     /// 是否是符号链接
     pub fn is_symlink(&self) -> bool {
-        (u16::from_le(self.mode) & EXT4_INODE_MODE_SOFTLINK) != 0
+        (u16::from_le(self.mode) & EXT4_INODE_MODE_TYPE_MASK) == EXT4_INODE_MODE_SOFTLINK
     }
 }
 
