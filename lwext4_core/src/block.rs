@@ -65,9 +65,21 @@ pub fn ext4_block_readbytes(
     // 1. 计算起始块号
     // 2. 读取跨越的所有块
     // 3. 复制所需字节到 buf
-
-    debug!("ext4_block_readbytes: offset={}, len={}", offset, len);
-    EOK
+    unsafe {
+        if (*(*bdev).bdif).ph_refctr == 0 {
+            return EIO;
+        }
+        if offset + len as u64 > (*bdev).part_size {
+            return EINVAL;
+        }
+        let block_idx = (offset + (*bdev).part_offset) / (*(*bdev).bdif).ph_bsize as u64;
+        let unalg=offset & ((*(*bdev).bdif).ph_bsize-1) as u64;
+        if unalg!=0 {
+            let rlen:u32 = if (*(*bdev).bdif).ph_bsize -unalg as u32>len as u32{len as u32} else {(*(*bdev).bdif).ph_bsize-unalg as u32} ;
+        }
+        debug!("ext4_block_readbytes: offset={}, len={}", offset, len);
+        EOK
+    }
 }
 
 /// 写入字节（占位实现）
