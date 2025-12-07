@@ -562,6 +562,16 @@ impl<D: BlockDevice> Ext4BlockDev<D> {
         self.ph_bsize
     }
 
+    /// 获取逻辑块数量
+    pub fn lg_bcnt(&self) -> u64 {
+        self.lg_bcnt
+    }
+
+    /// 获取物理块数量
+    pub fn ph_bcnt(&self) -> u64 {
+        self.ph_bcnt
+    }
+
     /// 获取分区偏移
     pub fn part_offset(&self) -> u64 {
         self.part_offset
