@@ -1,6 +1,6 @@
 //! 集成测试 - 测试 lwext4_core 的 Rust API
 
-use lwext4_core::{BlockDevice, Ext4BlockDev, Ext4Error, Ext4Result};
+use lwext4_core::{BlockDevice, BlockDev, Error, ErrorKind, Result};
 use std::fs::File;
 use std::io::{Read, Write, Seek, SeekFrom};
 
@@ -32,7 +32,7 @@ impl BlockDevice for FileBlockDevice {
         LOGICAL_BLOCK_SIZE
     }
 
-    fn physical_block_size(&self) -> u32 {
+    fn sector_size(&self) -> u32 {
         PHYSICAL_BLOCK_SIZE
     }
 
@@ -40,43 +40,43 @@ impl BlockDevice for FileBlockDevice {
         self.total_size / self.block_size() as u64
     }
 
-    fn read_blocks(&mut self, lba: u64, count: u32, buf: &mut [u8]) -> Ext4Result<usize> {
-        let offset = lba * self.physical_block_size() as u64;
-        let size = count as usize * self.physical_block_size() as usize;
+    fn read_blocks(&mut self, lba: u64, count: u32, buf: &mut [u8]) -> Result<usize> {
+        let offset = lba * self.sector_size() as u64;
+        let size = count as usize * self.sector_size() as usize;
 
         if buf.len() < size {
-            return Err(Ext4Error::new(22, "buffer too small")); // EINVAL
+            return Err(Error::new(ErrorKind::InvalidInput, "buffer too small"));
         }
 
         self.file.seek(SeekFrom::Start(offset))
-            .map_err(|_| Ext4Error::new(5, "seek failed"))?; // EIO
+            .map_err(|_| Error::new(ErrorKind::Io, "seek failed"))?;
 
         self.file.read_exact(&mut buf[..size])
-            .map_err(|_| Ext4Error::new(5, "read failed"))?; // EIO
+            .map_err(|_| Error::new(ErrorKind::Io, "read failed"))?;
 
         Ok(size)
     }
 
-    fn write_blocks(&mut self, lba: u64, count: u32, buf: &[u8]) -> Ext4Result<usize> {
-        let offset = lba * self.physical_block_size() as u64;
-        let size = count as usize * self.physical_block_size() as usize;
+    fn write_blocks(&mut self, lba: u64, count: u32, buf: &[u8]) -> Result<usize> {
+        let offset = lba * self.sector_size() as u64;
+        let size = count as usize * self.sector_size() as usize;
 
         if buf.len() < size {
-            return Err(Ext4Error::new(22, "buffer too small")); // EINVAL
+            return Err(Error::new(ErrorKind::InvalidInput, "buffer too small"));
         }
 
         self.file.seek(SeekFrom::Start(offset))
-            .map_err(|_| Ext4Error::new(5, "seek failed"))?; // EIO
+            .map_err(|_| Error::new(ErrorKind::Io, "seek failed"))?;
 
         self.file.write_all(&buf[..size])
-            .map_err(|_| Ext4Error::new(5, "write failed"))?; // EIO
+            .map_err(|_| Error::new(ErrorKind::Io, "write failed"))?;
 
         Ok(size)
     }
 
-    fn flush(&mut self) -> Ext4Result<()> {
+    fn flush(&mut self) -> Result<()> {
         self.file.sync_all()
-            .map_err(|_| Ext4Error::new(5, "flush failed")) // EIO
+            .map_err(|_| Error::new(ErrorKind::Io, "flush failed"))
     }
 }
 
@@ -85,11 +85,11 @@ fn test_block_device_creation() {
     let test_image = "/home/c20h30o2/files/lwext4-rust/lwext4-rust/test-images/test.ext4";
     let device = FileBlockDevice::open(test_image).expect("Failed to open test image");
 
-    let bdev = Ext4BlockDev::new(device);
+    let bdev = BlockDev::new(device);
 
-    assert_eq!(bdev.lg_bsize(), LOGICAL_BLOCK_SIZE);
-    assert_eq!(bdev.ph_bsize(), PHYSICAL_BLOCK_SIZE);
-    assert!(bdev.lg_bcnt() > 0);
+    assert_eq!(bdev.block_size(), LOGICAL_BLOCK_SIZE);
+    assert_eq!(bdev.sector_size(), PHYSICAL_BLOCK_SIZE);
+    assert!(bdev.total_blocks() > 0);
 
     println!("✅ Block device created successfully!");
 }
@@ -99,11 +99,11 @@ fn test_block_read_write() {
     let test_image = "/home/c20h30o2/files/lwext4-rust/lwext4-rust/test-images/test.ext4";
     let device = FileBlockDevice::open(test_image).expect("Failed to open test image");
 
-    let mut bdev = Ext4BlockDev::new(device);
+    let mut bdev = BlockDev::new(device);
 
     // 测试读取第一个块
     let mut buf = vec![0u8; LOGICAL_BLOCK_SIZE as usize];
-    let result = bdev.ext4_blocks_get_direct(0, &mut buf);
+    let result = bdev.read_block(0, &mut buf);
 
     assert!(result.is_ok(), "Failed to read block: {:?}", result.err());
 
@@ -118,11 +118,11 @@ fn test_byte_level_read() {
     let test_image = "/home/c20h30o2/files/lwext4-rust/lwext4-rust/test-images/test.ext4";
     let device = FileBlockDevice::open(test_image).expect("Failed to open test image");
 
-    let mut bdev = Ext4BlockDev::new(device);
+    let mut bdev = BlockDev::new(device);
 
     // 测试字节级读取
     let mut buf = vec![0u8; 100];
-    let result = bdev.ext4_block_readbytes(1024, &mut buf);
+    let result = bdev.read_bytes(1024, &mut buf);
 
     assert!(result.is_ok(), "Failed to read bytes: {:?}", result.err());
 
@@ -137,18 +137,18 @@ fn test_statistics() {
     let test_image = "/home/c20h30o2/files/lwext4-rust/lwext4-rust/test-images/test.ext4";
     let device = FileBlockDevice::open(test_image).expect("Failed to open test image");
 
-    let mut bdev = Ext4BlockDev::new(device);
+    let mut bdev = BlockDev::new(device);
 
-    assert_eq!(bdev.bread_ctr(), 0);
-    assert_eq!(bdev.bwrite_ctr(), 0);
+    assert_eq!(bdev.read_count(), 0);
+    assert_eq!(bdev.write_count(), 0);
 
     // 执行一次读取
     let mut buf = vec![0u8; LOGICAL_BLOCK_SIZE as usize];
-    let _ = bdev.ext4_blocks_get_direct(0, &mut buf);
+    let _ = bdev.read_block(0, &mut buf);
 
     // 验证计数器增加
-    assert_eq!(bdev.bread_ctr(), 1);
-    assert_eq!(bdev.bwrite_ctr(), 0);
+    assert_eq!(bdev.read_count(), 1);
+    assert_eq!(bdev.write_count(), 0);
 
     println!("✅ Statistics tracking works correctly!");
 }

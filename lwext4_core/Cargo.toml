@@ -16,3 +16,4 @@ bitflags = "2.4"
 [features]
 default = []
 std = []
+c-api = []  # C API 兼容层
