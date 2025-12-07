@@ -140,13 +140,6 @@ impl ext4_inode_ref {
     }
 }
 
-/// 块设备接口（trait，由调用者实现）
-pub trait BlockDevice {
-    fn read_blocks(&mut self, block_id: u64, buf: &mut [u8]) -> crate::Ext4Result<usize>;
-    fn write_blocks(&mut self, block_id: u64, buf: &[u8]) -> crate::Ext4Result<usize>;
-    fn num_blocks(&self) -> crate::Ext4Result<u64>;
-}
-
 /// 文件系统结构
 ///
 /// 对应C定义: struct ext4_fs (ext4_fs.h:56-70)
@@ -481,3 +474,157 @@ pub type Ext4DirIterator = ext4_dir_iter;
 
 /// Rust风格别名：目录搜索结果
 pub type Ext4DirSearchResult = ext4_dir_search_result;
+
+//=============================================================================
+// Rust 风格重构定义（新增）
+//=============================================================================
+
+use crate::traits::BlockDevice;
+use alloc::boxed::Box;
+
+/// 块设备结构（Rust 风格）
+///
+/// 对应 C 的 `ext4_blockdev`，但使用泛型和 Rust 特性
+pub struct Ext4BlockDev<D: BlockDevice> {
+    /// 底层块设备
+    device: D,
+
+    /// 分区偏移（字节）
+    part_offset: u64,
+
+    /// 分区大小（字节）
+    part_size: u64,
+
+    /// 逻辑块大小（字节）
+    lg_bsize: u32,
+
+    /// 逻辑块数量
+    lg_bcnt: u64,
+
+    /// 物理块大小（字节）
+    ph_bsize: u32,
+
+    /// 物理块数量
+    ph_bcnt: u64,
+
+    /// 块缓存（可选）
+    cache: Option<Box<Ext4BCache>>,
+
+    /// 缓存回写模式计数
+    cache_write_back: u32,
+
+    /// 读操作计数（统计）
+    bread_ctr: u64,
+
+    /// 写操作计数（统计）
+    bwrite_ctr: u64,
+}
+
+impl<D: BlockDevice> Ext4BlockDev<D> {
+    /// 创建新的块设备
+    pub fn new(device: D) -> Self {
+        let ph_bsize = device.physical_block_size();
+        let lg_bsize = device.block_size();
+        let total_blocks = device.total_blocks();
+
+        Self {
+            device,
+            part_offset: 0,
+            part_size: 0,
+            lg_bsize,
+            lg_bcnt: total_blocks,
+            ph_bsize,
+            ph_bcnt: total_blocks,
+            cache: None,
+            cache_write_back: 0,
+            bread_ctr: 0,
+            bwrite_ctr: 0,
+        }
+    }
+
+    /// 获取底层设备的可变引用
+    pub fn device_mut(&mut self) -> &mut D {
+        &mut self.device
+    }
+
+    /// 获取底层设备的引用
+    pub fn device(&self) -> &D {
+        &self.device
+    }
+
+    /// 获取逻辑块大小
+    pub fn lg_bsize(&self) -> u32 {
+        self.lg_bsize
+    }
+
+    /// 获取物理块大小
+    pub fn ph_bsize(&self) -> u32 {
+        self.ph_bsize
+    }
+
+    /// 获取分区偏移
+    pub fn part_offset(&self) -> u64 {
+        self.part_offset
+    }
+
+    /// 设置分区偏移
+    pub fn set_part_offset(&mut self, offset: u64) {
+        self.part_offset = offset;
+    }
+
+    /// 获取读操作计数
+    pub fn bread_ctr(&self) -> u64 {
+        self.bread_ctr
+    }
+
+    /// 获取写操作计数
+    pub fn bwrite_ctr(&self) -> u64 {
+        self.bwrite_ctr
+    }
+
+    /// 增加读操作计数
+    pub(crate) fn inc_bread_ctr(&mut self) {
+        self.bread_ctr += 1;
+    }
+
+    /// 增加写操作计数
+    pub(crate) fn inc_bwrite_ctr(&mut self) {
+        self.bwrite_ctr += 1;
+    }
+}
+
+/// 块缓存结构（Rust 风格）- 暂未实现
+///
+/// 对应 C 的 `ext4_bcache`，使用 Rust 惯用数据结构
+/// TODO: 实现实际的缓存逻辑（LRU、HashMap 等）
+pub struct Ext4BCache {
+    /// 缓存项数量
+    cnt: u32,
+
+    /// 每个缓存项大小
+    itemsize: u32,
+
+    /// LRU 计数器
+    lru_ctr: u32,
+
+    /// 当前引用的块数
+    ref_blocks: u32,
+
+    /// 最大引用块数
+    max_ref_blocks: u32,
+
+    // TODO: 实际的缓存数据结构（HashMap, LRU list 等）
+}
+
+impl Ext4BCache {
+    /// 创建新的块缓存
+    pub fn new(cnt: u32, itemsize: u32) -> Self {
+        Self {
+            cnt,
+            itemsize,
+            lru_ctr: 0,
+            ref_blocks: 0,
+            max_ref_blocks: 0,
+        }
+    }
+}

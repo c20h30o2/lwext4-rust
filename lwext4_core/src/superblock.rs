@@ -8,8 +8,12 @@ pub fn read_superblock<D: BlockDevice>(dev: &mut D) -> Ext4Result<Ext4Superblock
     let mut sb_buf = [0u8; EXT4_SUPERBLOCK_SIZE];
 
     // 读取 superblock（从偏移 1024 开始）
-    let start_block = EXT4_SUPERBLOCK_OFFSET / EXT4_DEV_BSIZE as u64;
-    dev.read_blocks(start_block, &mut sb_buf)?;
+    // 计算需要读取的块数
+    let ph_bsize = dev.physical_block_size() as u64;
+    let start_block = EXT4_SUPERBLOCK_OFFSET / ph_bsize;
+    let block_count = ((EXT4_SUPERBLOCK_SIZE as u64 + ph_bsize - 1) / ph_bsize) as u32;
+
+    dev.read_blocks(start_block, block_count, &mut sb_buf)?;
 
     // 解析 superblock（暂时简化，直接转换）
     let sb = unsafe {

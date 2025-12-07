@@ -11,6 +11,7 @@ extern crate alloc;
 pub mod consts;
 pub mod types;
 pub mod error;
+pub mod traits;
 pub mod superblock;
 pub mod inode;
 pub mod block;
@@ -20,6 +21,7 @@ pub mod fs;
 // 重新导出常用类型
 pub use consts::*;
 pub use error::{Ext4Error, Ext4Result};
+pub use traits::BlockDevice;
 pub use types::*;
 
 // 重新导出所有API函数
