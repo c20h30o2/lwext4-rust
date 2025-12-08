@@ -245,6 +245,21 @@ impl Inode {
         self.dtime() != 0
     }
 
+    /// 获取访问时间（别名）
+    pub fn access_time(&self) -> u32 {
+        self.atime()
+    }
+
+    /// 获取修改时间（别名）
+    pub fn modification_time(&self) -> u32 {
+        self.mtime()
+    }
+
+    /// 获取改变时间（别名）
+    pub fn change_time(&self) -> u32 {
+        self.ctime()
+    }
+
     /// 获取 UID（用户 ID）
     pub fn uid(&self) -> u32 {
         (u16::from_le(self.inner.uid) as u32)

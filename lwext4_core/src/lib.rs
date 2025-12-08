@@ -74,8 +74,8 @@ pub mod extent;
 /// 目录操作
 pub mod dir;
 
-// 待实现的模块
-// pub mod fs;
+/// 文件系统高级 API
+pub mod fs;
 
 // ===== C API 兼容层（可选）=====
 
@@ -104,6 +104,9 @@ pub use extent::ExtentTree;
 
 // Dir
 pub use dir::{DirEntry, DirIterator, PathLookup, read_dir, lookup_path, get_inode_by_path};
+
+// FileSystem
+pub use fs::{Ext4FileSystem, File, FileMetadata, FileType};
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]
