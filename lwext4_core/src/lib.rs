@@ -77,6 +77,9 @@ pub mod dir;
 /// 文件系统高级 API
 pub mod fs;
 
+/// 块缓存
+pub mod cache;
+
 // ===== C API 兼容层（可选）=====
 
 /// C API 兼容层
@@ -107,6 +110,9 @@ pub use dir::{DirEntry, DirIterator, PathLookup, read_dir, lookup_path, get_inod
 
 // FileSystem
 pub use fs::{Ext4FileSystem, File, FileMetadata, FileType};
+
+// Cache
+pub use cache::{BlockCache, CacheBuffer, CacheFlags, CacheStats, BufferId, DEFAULT_CACHE_SIZE};
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]
