@@ -44,6 +44,24 @@ pub const EXT4_GROUP_DESC_SIZE: usize = 32;
 /// 块组描述符大小（64位）
 pub const EXT4_GROUP_DESC_SIZE_64: usize = 64;
 
+/// 块组描述符最小大小
+pub const EXT4_MIN_BLOCK_GROUP_DESCRIPTOR_SIZE: usize = 32;
+
+/// 块组描述符最大大小
+pub const EXT4_MAX_BLOCK_GROUP_DESCRIPTOR_SIZE: usize = 1024;
+
+/// Superblock 状态：有效/已挂载
+pub const EXT4_SUPER_STATE_VALID: u16 = 0x0001;
+
+/// Superblock 状态：有错误
+pub const EXT4_SUPER_STATE_ERROR: u16 = 0x0002;
+
+/// Superblock 状态：孤儿恢复中
+pub const EXT4_SUPER_STATE_ORPHAN: u16 = 0x0004;
+
+/// 校验和类型：CRC32C
+pub const EXT4_CHECKSUM_CRC32C: u8 = 1;
+
 //=============================================================================
 // Inode 相关
 //=============================================================================

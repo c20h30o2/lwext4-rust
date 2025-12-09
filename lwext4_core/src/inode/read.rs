@@ -164,6 +164,37 @@ impl Inode {
     }
 
     /// 获取占用的块数（512 字节为单位）
+    ///
+    /// 支持 HUGE_FILE 特性，对应 lwext4 的 `ext4_inode_get_blocks_count()`
+    ///
+    /// # 参数
+    ///
+    /// * `sb` - superblock 引用
+    pub fn blocks_count_with_sb(&self, sb: &Superblock) -> u64 {
+        // 1. 读取 32 位低位
+        let mut cnt = u32::from_le(self.inner.blocks_count_lo) as u64;
+
+        // 2. 检查是否启用了 HUGE_FILE 特性
+        if sb.has_ro_compat_feature(EXT4_FEATURE_RO_COMPAT_HUGE_FILE) {
+            // 3. 扩展到 48 位
+            cnt |= (u16::from_le(self.inner.osd2.linux2.blocks_high) as u64) << 32;
+
+            // 4. 检查 inode 是否使用了 HUGE_FILE 标志
+            if self.flags() & EXT4_INODE_FLAG_HUGE_FILE != 0 {
+                // 5. 进行比例换算：从文件系统块单位转换为 512 字节单位
+                let block_size = sb.block_size();
+                let block_bits = super::write::inode_block_bits_count(block_size);
+                return cnt << (block_bits - 9);
+            }
+        }
+
+        cnt
+    }
+
+    /// 获取占用的块数（简化版本，不支持 HUGE_FILE）
+    ///
+    /// 仅返回 32 位块计数，如果需要正确处理 HUGE_FILE，
+    /// 请使用 `blocks_count_with_sb()`
     pub fn blocks_count(&self) -> u64 {
         self.inner.blocks_count()
     }

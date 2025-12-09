@@ -80,6 +80,9 @@ pub mod fs;
 /// 块缓存
 pub mod cache;
 
+/// 位图操作
+pub mod bitmap;
+
 // ===== C API 兼容层（可选）=====
 
 /// C API 兼容层
@@ -94,7 +97,7 @@ pub mod c_api;
 pub use error::{Error, ErrorKind, Result};
 
 // 块设备
-pub use block::{BlockDevice, BlockDev};
+pub use block::{BlockDevice, BlockDev, Block};
 
 // Superblock
 pub use superblock::{Superblock, read_superblock};

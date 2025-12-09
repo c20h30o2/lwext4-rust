@@ -7,7 +7,7 @@
 //! 提供了更好的类型安全性和内存安全性。
 
 use crate::{
-    block::{BlockDev, BlockDevice},
+    block::BlockDevice,
     error::{Error, ErrorKind, Result},
 };
 
@@ -124,6 +124,14 @@ pub struct BlockCache {
     ///
     /// 对应 lwext4 的 `dont_shake`
     dont_shake: bool,
+
+    /// 写回模式引用计数
+    ///
+    /// 对应 lwext4 的 `cache_write_back`
+    ///
+    /// 当 > 0 时启用写回模式（延迟写入）
+    /// 当 == 0 时启用写穿模式（立即写入）
+    write_back_counter: u32,
 }
 
 impl BlockCache {
@@ -152,6 +160,7 @@ impl BlockCache {
             ref_blocks: 0,
             max_ref_blocks: None,
             dont_shake: false,
+            write_back_counter: 0,
         }
     }
 
@@ -579,7 +588,9 @@ impl BlockCache {
     ///
     /// # 参数
     ///
-    /// * `device` - 块设备
+    /// * `device` - 块设备（直接操作 BlockDevice trait）
+    /// * `sector_size` - 扇区大小
+    /// * `partition_offset` - 分区偏移（字节）
     ///
     /// # 返回
     ///
@@ -588,16 +599,25 @@ impl BlockCache {
     /// # 错误
     ///
     /// 如果任何写入操作失败，返回错误
-    pub fn flush_all<D: BlockDevice>(&mut self, device: &mut BlockDev<D>) -> Result<usize> {
+    pub fn flush_all<D: BlockDevice>(
+        &mut self,
+        device: &mut D,
+        sector_size: u32,
+        partition_offset: u64,
+    ) -> Result<usize> {
         let mut flushed = 0;
 
         // 处理所有脏块
         while let Some(id) = self.dirty_list.pop_front() {
             if let Some(buf) = &mut self.buffers[id] {
                 if buf.is_dirty() {
+                    // 计算物理扇区地址
+                    let byte_offset = buf.lba * self.block_size as u64 + partition_offset;
+                    let pba = byte_offset / sector_size as u64;
+                    let count = self.block_size as u32 / sector_size;
+
                     // 写入块到设备
-                    let offset = buf.lba * self.block_size as u64;
-                    let result = device.write_bytes(offset, &buf.data);
+                    let result = device.write_blocks(pba, count, &buf.data);
 
                     // 检查写入结果
                     let is_ok = result.is_ok();
@@ -621,11 +641,203 @@ impl BlockCache {
         Ok(flushed)
     }
 
+    /// 刷新指定逻辑块地址的缓存到磁盘
+    ///
+    /// # 参数
+    ///
+    /// * `lba` - 逻辑块地址
+    /// * `device` - 块设备（直接操作 BlockDevice trait）
+    /// * `sector_size` - 扇区大小
+    /// * `partition_offset` - 分区偏移（字节）
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 Ok(())
+    ///
+    /// # 错误
+    ///
+    /// 如果块不在缓存中或写入失败，返回错误
+    pub fn flush_lba<D: BlockDevice>(
+        &mut self,
+        lba: u64,
+        device: &mut D,
+        sector_size: u32,
+        partition_offset: u64,
+    ) -> Result<()> {
+        let id = *self
+            .lba_index
+            .get(&lba)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Block not in cache"))?;
+
+        if self.dirty_list.contains(&id) {
+            let buf = self.buffers[id].as_mut().unwrap();
+            if buf.is_dirty() {
+                // 计算物理扇区地址
+                let byte_offset = buf.lba * self.block_size as u64 + partition_offset;
+                let pba = byte_offset / sector_size as u64;
+                let count = self.block_size as u32 / sector_size;
+
+                // 写入块到设备
+                let result = device.write_blocks(pba, count, &buf.data);
+                let is_ok = result.is_ok();
+
+                // 调用写入完成回调
+                buf.invoke_end_write(result.map(|_| ()));
+
+                if is_ok {
+                    buf.mark_clean();
+                    // 从脏列表中移除
+                    if let Some(index) = self.dirty_list.iter().position(|x| x == &id) {
+                        self.dirty_list.remove(index);
+                    }
+                } else {
+                    return Err(Error::new(ErrorKind::Io, "Failed to write block"));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 从缓存读取块数据
+    ///
+    /// 如果块在缓存中且数据有效，返回块数据的引用。
+    ///
+    /// # 参数
+    ///
+    /// * `lba` - 逻辑块地址
+    ///
+    /// # 返回
+    ///
+    /// 成功返回块数据的切片引用
+    ///
+    /// # 错误
+    ///
+    /// 如果块不在缓存中或数据无效，返回错误
+    pub fn read_block(&self, lba: u64) -> Result<&[u8]> {
+        let id = *self
+            .lba_index
+            .get(&lba)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Block not in cache"))?;
+
+        let buf = self.buffers[id]
+            .as_ref()
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Invalid buffer slot"))?;
+
+        if !buf.is_uptodate() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Block data not valid",
+            ));
+        }
+
+        Ok(&buf.data)
+    }
+
+    /// 将数据写入缓存块
+    ///
+    /// 将数据写入缓存块并标记为脏。如果块不在缓存中，返回错误。
+    ///
+    /// # 参数
+    ///
+    /// * `lba` - 逻辑块地址
+    /// * `data` - 要写入的数据
+    ///
+    /// # 返回
+    ///
+    /// 成功返回写入的字节数
+    ///
+    /// # 错误
+    ///
+    /// 如果块不在缓存中，返回错误
+    pub fn write_block(&mut self, lba: u64, data: &[u8]) -> Result<usize> {
+        let id = *self
+            .lba_index
+            .get(&lba)
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Block not in cache"))?;
+
+        let buf = self.buffers[id]
+            .as_mut()
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Invalid buffer slot"))?;
+
+        if data.len() > buf.data.len() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Data too large for block",
+            ));
+        }
+
+        // 写入数据
+        buf.data[..data.len()].copy_from_slice(data);
+
+        // 标记为脏和有效
+        buf.mark_uptodate();
+        if !buf.is_dirty() {
+            buf.mark_dirty();
+            self.dirty_list.push_back(id);
+        }
+
+        Ok(data.len())
+    }
+
     /// 生成下一个 LRU ID
     fn next_lru_id(&mut self) -> u32 {
         let id = self.lru_counter;
         self.lru_counter = self.lru_counter.wrapping_add(1);
         id
+    }
+
+    /// 启用写回模式
+    ///
+    /// 对应 lwext4 的 `ext4_block_cache_write_back(bdev, 1)`
+    ///
+    /// 启用后，脏块会保留在缓存中，直到显式刷新或驱逐。
+    /// 可以多次调用以实现嵌套的写回模式控制。
+    pub fn enable_write_back(&mut self) {
+        self.write_back_counter = self.write_back_counter.saturating_add(1);
+    }
+
+    /// 禁用写回模式
+    ///
+    /// 对应 lwext4 的 `ext4_block_cache_write_back(bdev, 0)`
+    ///
+    /// 如果引用计数降为 0，会立即刷新所有脏块到设备。
+    ///
+    /// # 参数
+    ///
+    /// * `device` - 块设备
+    /// * `sector_size` - 扇区大小
+    /// * `partition_offset` - 分区偏移
+    ///
+    /// # 返回
+    ///
+    /// 成功返回刷新的块数量，如果仍处于写回模式则返回 0
+    pub fn disable_write_back<D: BlockDevice>(
+        &mut self,
+        device: &mut D,
+        sector_size: u32,
+        partition_offset: u64,
+    ) -> Result<usize> {
+        if self.write_back_counter > 0 {
+            self.write_back_counter -= 1;
+        }
+
+        // 如果计数器降为 0，刷新所有脏块
+        if self.write_back_counter == 0 {
+            return self.flush_all(device, sector_size, partition_offset);
+        }
+
+        Ok(0)
+    }
+
+    /// 检查是否启用写回模式
+    pub fn is_write_back_enabled(&self) -> bool {
+        self.write_back_counter > 0
+    }
+
+    /// 获取写回模式引用计数
+    pub fn write_back_counter(&self) -> u32 {
+        self.write_back_counter
     }
 }
 
