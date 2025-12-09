@@ -8,6 +8,7 @@ impl<D: BlockDevice> BlockDev<D> {
     /// 读取单个逻辑块
     ///
     /// 从指定逻辑块地址读取一个完整的块到缓冲区。
+    /// 如果启用了缓存，优先从缓存读取；缓存未命中则从设备读取并填充缓存。
     ///
     /// # 参数
     ///
@@ -27,16 +28,50 @@ impl<D: BlockDevice> BlockDev<D> {
             ));
         }
 
+        self.inc_read_count();
+
+        // 如果启用了缓存，尝试从缓存读取
+        let cache_miss = if let Some(cache) = &self.bcache {
+            // 尝试从缓存读取（只读检查）
+            match cache.read_block(lba) {
+                Ok(data) => {
+                    // 缓存命中
+                    buf[..data.len()].copy_from_slice(data);
+                    return Ok(data.len());
+                }
+                Err(_) => true, // 缓存未命中
+            }
+        } else {
+            false // 无缓存
+        };
+
+        if cache_miss {
+            // 缓存未命中 - 从设备读取到用户缓冲区
+            let pba = self.logical_to_physical(lba);
+            let count = self.sectors_per_block();
+            self.device_mut().read_blocks(pba, count, buf)?;
+
+            // 将数据填充到缓存
+            if let Some(cache) = &mut self.bcache {
+                let (cache_buf, _is_new) = cache.alloc(lba)?;
+                cache_buf.data.copy_from_slice(&buf[..block_size as usize]);
+                cache_buf.mark_uptodate();
+                cache.free(lba)?;
+            }
+
+            return Ok(block_size as usize);
+        }
+
+        // 无缓存 - 直接从设备读取
         let pba = self.logical_to_physical(lba);
         let count = self.sectors_per_block();
-
-        self.inc_read_count();
         self.device_mut().read_blocks(pba, count, buf)
     }
 
     /// 写入单个逻辑块
     ///
     /// 将缓冲区数据写入指定逻辑块地址。
+    /// 如果启用了缓存，写入缓存并标记为脏；否则直接写入设备。
     ///
     /// # 参数
     ///
@@ -56,10 +91,37 @@ impl<D: BlockDevice> BlockDev<D> {
             ));
         }
 
+        self.inc_write_count();
+
+        // 如果启用了缓存，写入缓存
+        if let Some(cache) = &mut self.bcache {
+            // 先尝试从缓存获取块（可能已存在）
+            match cache.write_block(lba, buf) {
+                Ok(n) => {
+                    // 块已在缓存中，写入成功
+                    return Ok(n);
+                }
+                Err(_) => {
+                    // 块不在缓存中 - 分配新块并写入
+                    let (cache_buf, _is_new) = cache.alloc(lba)?;
+                    cache_buf.data[..buf.len()].copy_from_slice(buf);
+                    cache_buf.mark_uptodate();
+                    cache_buf.mark_dirty();
+
+                    // 将块加入脏列表
+                    cache.mark_dirty(lba)?;
+
+                    // 减少引用计数
+                    cache.free(lba)?;
+
+                    return Ok(buf.len());
+                }
+            }
+        }
+
+        // 无缓存 - 直接写入设备
         let pba = self.logical_to_physical(lba);
         let count = self.sectors_per_block();
-
-        self.inc_write_count();
         self.device_mut().write_blocks(pba, count, buf)
     }
 
@@ -167,8 +229,22 @@ impl<D: BlockDevice> BlockDev<D> {
 
     /// 刷新所有缓存
     ///
-    /// 确保所有待写入数据已写入设备。
+    /// 如果启用了缓存，先刷新所有脏块到设备，然后调用设备的 flush。
+    /// 这是两层刷新：缓存层和硬件层。
     pub fn flush(&mut self) -> Result<()> {
+        // 第一层：刷新缓存中的脏块
+        let sector_size = self.device().sector_size();
+        let partition_offset = self.partition_offset();
+
+        // 临时取出缓存以避免借用冲突
+        if let Some(mut cache) = self.bcache.take() {
+            let result = cache.flush_all(self.device_mut(), sector_size, partition_offset);
+            // 恢复缓存
+            self.bcache = Some(cache);
+            result?;
+        }
+
+        // 第二层：调用设备的硬件刷新（如 fsync）
         self.device_mut().flush()
     }
 }
