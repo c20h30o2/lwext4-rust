@@ -1,7 +1,7 @@
 //! Extent 树解析和块映射
 
 use crate::{
-    block::{BlockDev, BlockDevice},
+    block::{Block, BlockDev, BlockDevice},
     error::{Error, ErrorKind, Result},
     inode::Inode,
     types::{ext4_extent, ext4_extent_header, ext4_extent_idx},
@@ -167,8 +167,17 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
         if let Some(idx) = target_idx {
             // 读取子节点
             let child_block = idx.leaf_block();
-            let mut child_data = alloc::vec![0u8; self.block_size as usize];
-            self.bdev.read_block(child_block, &mut child_data)?;
+            let mut block = Block::get(self.bdev, child_block)?;
+
+            // 复制子节点数据到独立的缓冲区
+            let child_data = block.with_data(|data| {
+                let mut buf = alloc::vec![0u8; data.len()];
+                buf.copy_from_slice(data);
+                buf
+            })?;
+
+            // 释放 block，这样我们就可以递归调用了
+            drop(block);
 
             // 解析子节点的头部
             let child_header = unsafe {
@@ -211,8 +220,11 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
 
         match self.map_block(inode, logical_block)? {
             Some(physical_block) => {
-                self.bdev.read_block(physical_block, buf)?;
-                Ok(())
+                let mut block = Block::get(self.bdev, physical_block)?;
+                block.with_data(|data| {
+                    buf[..self.block_size as usize].copy_from_slice(data);
+                    Ok(())
+                })?
             }
             None => Err(Error::new(
                 ErrorKind::NotFound,

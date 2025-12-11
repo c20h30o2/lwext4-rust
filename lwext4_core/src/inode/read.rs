@@ -102,8 +102,8 @@ pub fn read_inode<D: BlockDevice>(
 
 /// Inode 包装器，提供高级操作
 pub struct Inode {
-    inner: ext4_inode,
-    inode_num: u32,
+    pub(super) inner: ext4_inode,
+    pub(super) inode_num: u32,
 }
 
 impl Inode {
@@ -177,7 +177,7 @@ impl Inode {
         // 2. 检查是否启用了 HUGE_FILE 特性
         if sb.has_ro_compat_feature(EXT4_FEATURE_RO_COMPAT_HUGE_FILE) {
             // 3. 扩展到 48 位
-            cnt |= (u16::from_le(self.inner.osd2.linux2.blocks_high) as u64) << 32;
+            cnt |= (u16::from_le(self.inner.blocks_high) as u64) << 32;
 
             // 4. 检查 inode 是否使用了 HUGE_FILE 标志
             if self.flags() & EXT4_INODE_FLAG_HUGE_FILE != 0 {

@@ -25,7 +25,7 @@ const EXT4_CRC32_INIT: u32 = !0u32; // 0xFFFFFFFF
 /// 32 位校验和值
 pub fn get_checksum(sb: &Superblock, inode: &ext4_inode) -> u32 {
     let inode_size = sb.inode_size();
-    let mut v = u16::from_le(inode.osd2.linux2.checksum_lo) as u32;
+    let mut v = u16::from_le(inode.checksum_lo) as u32;
 
     if inode_size > EXT4_GOOD_OLD_INODE_SIZE as u16 {
         v |= (u16::from_le(inode.checksum_hi) as u32) << 16;
@@ -45,10 +45,10 @@ pub fn get_checksum(sb: &Superblock, inode: &ext4_inode) -> u32 {
 /// * `checksum` - 校验和值
 pub fn set_checksum(sb: &Superblock, inode: &mut ext4_inode, checksum: u32) {
     let inode_size = sb.inode_size();
-    inode.osd2.linux2.checksum_lo = ((checksum << 16) >> 16).to_le() as u16;
+    inode.checksum_lo = (checksum as u16).to_le();
 
     if inode_size > EXT4_GOOD_OLD_INODE_SIZE as u16 {
-        inode.checksum_hi = (checksum >> 16).to_le() as u16;
+        inode.checksum_hi = ((checksum >> 16) as u16).to_le();
     }
 }
 
@@ -79,7 +79,6 @@ pub fn compute_checksum(sb: &Superblock, inode_num: u32, inode: &ext4_inode) -> 
     let mut crc = crc32c::crc32c_append(EXT4_CRC32_INIT, &inode_num_bytes);
 
     // 计算 checksum_lo 字段的偏移量
-    // 在 ext4_inode 结构中，osd2.linux2.checksum_lo 的位置
     let checksum_lo_offset = offset_of_checksum_lo();
 
     // 计算到 checksum_lo 之前的数据
@@ -87,7 +86,10 @@ pub fn compute_checksum(sb: &Superblock, inode_num: u32, inode: &ext4_inode) -> 
         crc = crc32c::crc32c_append(crc, &inode_bytes[..checksum_lo_offset]);
     }
 
-    // 跳过 checksum_lo 字段（2 字节）
+    // checksum_lo 字段应该被视为0（2字节）
+    let zero_bytes = [0u8; 2];
+    crc = crc32c::crc32c_append(crc, &zero_bytes);
+
     let after_checksum_lo = checksum_lo_offset + 2;
 
     if inode_size > EXT4_GOOD_OLD_INODE_SIZE {
@@ -99,7 +101,10 @@ pub fn compute_checksum(sb: &Superblock, inode_num: u32, inode: &ext4_inode) -> 
             crc = crc32c::crc32c_append(crc, &inode_bytes[after_checksum_lo..checksum_hi_offset]);
         }
 
-        // 跳过 checksum_hi 字段（2 字节），计算之后的数据
+        // checksum_hi 字段应该被视为0（2字节）
+        crc = crc32c::crc32c_append(crc, &zero_bytes);
+
+        // 计算 checksum_hi 之后的数据
         let after_checksum_hi = checksum_hi_offset + 2;
         if inode_size > after_checksum_hi {
             crc = crc32c::crc32c_append(crc, &inode_bytes[after_checksum_hi..inode_size]);
@@ -141,8 +146,8 @@ pub fn verify_checksum(sb: &Superblock, inode_num: u32, inode: &ext4_inode) -> b
 ///
 /// 在 ext4_inode 结构中的位置
 fn offset_of_checksum_lo() -> usize {
-    // osd2.linux2.checksum_lo 在标准 inode (128 字节) 的偏移 126
-    126
+    // checksum_lo 在偏移 124（根据 types.rs）
+    124
 }
 
 /// 获取 checksum_hi 字段的偏移量
@@ -166,7 +171,7 @@ mod tests {
         sb.inode_size = 128u16.to_le();
         sb.feature_ro_compat = 0u32.to_le();
 
-        let superblock = Superblock { inner: sb };
+        let superblock = Superblock::new(sb);
         let inode = ext4_inode::default();
 
         // 未启用 METADATA_CSUM，应该总是验证通过
@@ -180,7 +185,7 @@ mod tests {
         sb.inode_size = 256u16.to_le();
         sb.feature_ro_compat = EXT4_FEATURE_RO_COMPAT_METADATA_CSUM.to_le();
 
-        let superblock = Superblock { inner: sb };
+        let superblock = Superblock::new(sb);
         let mut inode = ext4_inode::default();
 
         // 计算并设置校验和
@@ -198,7 +203,7 @@ mod tests {
         sb.inode_size = 256u16.to_le();
         sb.feature_ro_compat = EXT4_FEATURE_RO_COMPAT_METADATA_CSUM.to_le();
 
-        let superblock = Superblock { inner: sb };
+        let superblock = Superblock::new(sb);
         let mut inode = ext4_inode::default();
 
         // 设置正确的校验和
@@ -221,7 +226,7 @@ mod tests {
         sb.magic = crate::consts::EXT4_SUPERBLOCK_MAGIC.to_le();
         sb.inode_size = 256u16.to_le();
 
-        let superblock = Superblock { inner: sb };
+        let superblock = Superblock::new(sb);
         let mut inode = ext4_inode::default();
 
         // 设置校验和

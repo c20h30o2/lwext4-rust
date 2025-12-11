@@ -95,6 +95,7 @@ impl<'a, D: BlockDevice> Block<'a, D> {
             if is_new {
                 // 新分配的块，需要从磁盘读取
                 // 先临时释放 cache 的借用
+                // bug: 这里释放后，之后再次alloc之间可能导致块被lru驱逐
                 cache.free(lba)?;
 
                 // 现在可以访问 block_dev 了

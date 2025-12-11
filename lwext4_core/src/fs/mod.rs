@@ -5,7 +5,11 @@
 mod filesystem;
 mod file;
 mod metadata;
+mod inode_ref;
+mod block_group_ref;
 
 pub use filesystem::Ext4FileSystem;
 pub use file::File;
 pub use metadata::{FileMetadata, FileType};
+pub use inode_ref::InodeRef;
+pub use block_group_ref::BlockGroupRef;

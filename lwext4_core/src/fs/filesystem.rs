@@ -9,7 +9,7 @@ use crate::{
 };
 use alloc::vec::Vec;
 
-use super::{file::File, metadata::FileMetadata};
+use super::{file::File, metadata::FileMetadata, inode_ref::InodeRef, block_group_ref::BlockGroupRef};
 
 /// Ext4 文件系统
 ///
@@ -73,6 +73,62 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     /// 获取块设备引用
     pub fn block_device(&self) -> &BlockDev<D> {
         &self.bdev
+    }
+
+    /// 获取可变块设备引用
+    pub fn block_device_mut(&mut self) -> &mut BlockDev<D> {
+        &mut self.bdev
+    }
+
+    /// 获取可变 superblock 引用
+    pub fn superblock_mut(&mut self) -> &mut Superblock {
+        &mut self.sb
+    }
+
+    /// 获取 inode 引用
+    ///
+    /// # 参数
+    ///
+    /// * `inode_num` - inode 编号
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 InodeRef，自动管理加载和写回
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let mut inode_ref = fs.get_inode_ref(2)?;
+    /// println!("Size: {}", inode_ref.size());
+    /// inode_ref.set_size(1024);
+    /// inode_ref.mark_dirty();
+    /// // 自动写回
+    /// ```
+    pub fn get_inode_ref(&mut self, inode_num: u32) -> Result<InodeRef<D>> {
+        InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)
+    }
+
+    /// 获取块组引用
+    ///
+    /// # 参数
+    ///
+    /// * `bgid` - 块组 ID
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 BlockGroupRef，自动管理加载和写回
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let mut bg_ref = fs.get_block_group_ref(0)?;
+    /// println!("Free blocks: {}", bg_ref.free_blocks_count());
+    /// bg_ref.dec_free_blocks(1);
+    /// bg_ref.mark_dirty();
+    /// // 自动写回
+    /// ```
+    pub fn get_block_group_ref(&mut self, bgid: u32) -> Result<BlockGroupRef<D>> {
+        BlockGroupRef::get(&mut self.bdev, &mut self.sb, bgid)
     }
 
     /// 打开文件
