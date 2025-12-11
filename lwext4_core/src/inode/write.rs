@@ -98,13 +98,12 @@ impl super::Inode {
     ///
     /// * `sb` - superblock 引用
     /// * `mode` - 模式值（包含文件类型和权限位）
-    pub fn set_mode(&mut self, sb: &Superblock, mode: u32) {
+    pub fn set_mode(&mut self, _sb: &Superblock, mode: u32) {
+        // 只使用低 16 位，ext4 标准 mode 是 16 位
         self.inner.mode = ((mode << 16) >> 16).to_le() as u16;
 
-        // Hurd 系统支持扩展的 mode 高 16 位
-        if sb.inner().creator_os == EXT4_SUPERBLOCK_OS_HURD.to_le() {
-            self.inner.osd2.hurd2.mode_high = (mode >> 16).to_le() as u16;
-        }
+        // 注意：Hurd 系统的 mode_high 字段在当前简化的结构中不存在
+        // 原始 lwext4 在 osd2.hurd2 中有 mode_high，但这里的实现没有包含该字段
     }
 
     /// 设置 UID（用户 ID）
@@ -298,7 +297,7 @@ impl super::Inode {
         self.inner.file_acl_lo = ((acl << 32) >> 32).to_le() as u32;
 
         if sb.inner().creator_os == EXT4_SUPERBLOCK_OS_LINUX.to_le() {
-            self.inner.osd2.linux2.file_acl_high = (acl >> 32).to_le() as u16;
+            self.inner.file_acl_high = (acl >> 32).to_le() as u16;
         }
     }
 
@@ -338,7 +337,7 @@ impl super::Inode {
         if count <= max_32bit {
             // 可以用 32 位表示
             self.inner.blocks_count_lo = (count as u32).to_le();
-            self.inner.osd2.linux2.blocks_high = 0;
+            self.inner.blocks_high = 0;
             self.clear_flag(EXT4_INODE_FLAG_HUGE_FILE);
             return Ok(());
         }
@@ -357,7 +356,7 @@ impl super::Inode {
         if count <= max_48bit {
             // 可以用 48 位表示（不需要比例换算）
             self.inner.blocks_count_lo = (count as u32).to_le();
-            self.inner.osd2.linux2.blocks_high = ((count >> 32) as u16).to_le();
+            self.inner.blocks_high = ((count >> 32) as u16).to_le();
             self.clear_flag(EXT4_INODE_FLAG_HUGE_FILE);
         } else {
             // 需要使用 HUGE_FILE 标志和比例换算
@@ -369,7 +368,7 @@ impl super::Inode {
             // 从 512 字节单位转换为文件系统块单位
             let scaled_count = count >> (block_bits - 9);
             self.inner.blocks_count_lo = (scaled_count as u32).to_le();
-            self.inner.osd2.linux2.blocks_high = ((scaled_count >> 32) as u16).to_le();
+            self.inner.blocks_high = ((scaled_count >> 32) as u16).to_le();
         }
 
         Ok(())

@@ -52,6 +52,11 @@ pub struct Superblock {
 }
 
 impl Superblock {
+    /// 从 ext4_sblock 创建 Superblock（主要用于测试）
+    pub fn new(inner: ext4_sblock) -> Self {
+        Self { inner }
+    }
+
     /// 从块设备加载 superblock
     pub fn load<D: BlockDevice>(bdev: &mut BlockDev<D>) -> Result<Self> {
         let inner = read_superblock(bdev)?;

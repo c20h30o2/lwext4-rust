@@ -68,6 +68,9 @@ pub mod superblock;
 /// Inode 操作
 pub mod inode;
 
+/// 块组操作
+pub mod block_group;
+
 /// Extent 树操作
 pub mod extent;
 
@@ -82,6 +85,12 @@ pub mod cache;
 
 /// 位图操作
 pub mod bitmap;
+
+/// Inode 分配
+pub mod ialloc;
+
+/// 块分配
+pub mod balloc;
 
 // ===== C API 兼容层（可选）=====
 
@@ -104,6 +113,9 @@ pub use superblock::{Superblock, read_superblock};
 
 // Inode
 pub use inode::{Inode, read_inode};
+
+// BlockGroup
+pub use block_group::{BlockGroup, read_block_group_desc, write_block_group_desc};
 
 // Extent
 pub use extent::ExtentTree;
