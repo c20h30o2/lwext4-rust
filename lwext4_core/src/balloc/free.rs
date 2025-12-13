@@ -7,6 +7,7 @@ use crate::{
     block::{Block, BlockDev, BlockDevice},
     block_group::BlockGroup,
     error::{Error, ErrorKind, Result},
+    fs::BlockGroupRef,
     superblock::Superblock,
 };
 
@@ -37,46 +38,48 @@ pub fn free_block<D: BlockDevice>(
     let bg_id = get_bgid_of_block(sb, baddr);
     let index_in_group = addr_to_idx_bg(sb, baddr);
 
-    // 加载块组描述符
-    let mut bg = BlockGroup::load(bdev, sb, bg_id)?;
+    // 第一步：获取位图地址和块组描述符副本
+    let (bitmap_block_addr, bg_copy) = {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, bg_id)?;
+        let bitmap_addr = bg_ref.block_bitmap()?;
+        let bg_data = bg_ref.get_block_group_copy()?;
+        (bitmap_addr, bg_data)
+    };
 
-    // 获取位图块地址
-    let bitmap_block_addr = bg.get_block_bitmap(sb);
+    // 第二步：操作位图
+    {
+        let mut bitmap_block = Block::get(bdev, bitmap_block_addr)?;
 
-    // 使用 Block 句柄操作位图
-    let mut bitmap_block = Block::get(bdev, bitmap_block_addr)?;
+        bitmap_block.with_data_mut(|bitmap_data| {
+            // 验证位图校验和（如果启用）
+            if !verify_bitmap_csum(sb, &bg_copy, bitmap_data) {
+                // 记录警告但继续操作
+            }
 
-    bitmap_block.with_data_mut(|bitmap_data| {
-        // 验证位图校验和（如果启用）
-        if !verify_bitmap_csum(sb, &bg, bitmap_data) {
-            // 记录警告但继续操作
-        }
+            // 清除位图中的位
+            clear_bit(bitmap_data, index_in_group)?;
 
-        // 清除位图中的位
-        clear_bit(bitmap_data, index_in_group)?;
+            // 更新位图校验和
+            let mut bg_for_csum = bg_copy;
+            set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
 
-        // 更新位图校验和
-        set_bitmap_csum(sb, &mut bg, bitmap_data);
+            Ok(())
+        })??;
+        // bitmap_block 在此处自动释放并写回
+    }
 
-        Ok(())
-    })??;
-
-    // 显式释放 bitmap_block
-    drop(bitmap_block);
+    // 第三步：更新块组描述符
+    {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, bg_id)?;
+        bg_ref.inc_free_blocks(1)?;
+        // bg_ref 在此处自动释放并写回
+    }
 
     // 更新 superblock 空闲块计数
     let mut sb_free_blocks = sb.free_blocks_count();
     sb_free_blocks += 1;
     sb.set_free_blocks_count(sb_free_blocks);
     sb.write(bdev)?;
-
-    // 更新块组空闲块计数
-    let mut free_blocks = bg.get_free_blocks_count(sb);
-    free_blocks += 1;
-    bg.set_free_blocks_count(sb, free_blocks);
-
-    // 写回块组描述符
-    bg.write(bdev, sb)?;
 
     Ok(())
 }
@@ -118,14 +121,8 @@ pub fn free_blocks<D: BlockDevice>(
 
     // 逐块组释放
     for bg_id in bg_first..=bg_last {
-        // 加载块组
-        let mut bg = BlockGroup::load(bdev, sb, bg_id)?;
-
         // 计算此块组中要释放的第一个块的索引
         let idx_in_bg_first = addr_to_idx_bg(sb, current);
-
-        // 获取位图块地址
-        let bitmap_blk = bg.get_block_bitmap(sb);
 
         // 计算此块组中可以释放的块数
         let block_size = sb.block_size();
@@ -136,26 +133,42 @@ pub fn free_blocks<D: BlockDevice>(
             free_cnt = remaining;
         }
 
-        // 使用 Block 句柄操作位图
-        let mut bitmap_block = Block::get(bdev, bitmap_blk)?;
+        // 第一步：获取位图地址和块组描述符副本
+        let (bitmap_blk, bg_copy) = {
+            let mut bg_ref = BlockGroupRef::get(bdev, sb, bg_id)?;
+            let bitmap_addr = bg_ref.block_bitmap()?;
+            let bg_data = bg_ref.get_block_group_copy()?;
+            (bitmap_addr, bg_data)
+        };
 
-        bitmap_block.with_data_mut(|bitmap_data| {
-            // 验证位图校验和（如果启用）
-            if !verify_bitmap_csum(sb, &bg, bitmap_data) {
-                // 记录警告但继续操作
-            }
+        // 第二步：操作位图
+        {
+            let mut bitmap_block = Block::get(bdev, bitmap_blk)?;
 
-            // 清除位图中的多个位
-            clear_bits(bitmap_data, idx_in_bg_first, free_cnt)?;
+            bitmap_block.with_data_mut(|bitmap_data| {
+                // 验证位图校验和（如果启用）
+                if !verify_bitmap_csum(sb, &bg_copy, bitmap_data) {
+                    // 记录警告但继续操作
+                }
 
-            // 更新位图校验和
-            set_bitmap_csum(sb, &mut bg, bitmap_data);
+                // 清除位图中的多个位
+                clear_bits(bitmap_data, idx_in_bg_first, free_cnt)?;
 
-            Ok(())
-        })??;
+                // 更新位图校验和
+                let mut bg_for_csum = bg_copy;
+                set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
 
-        // 显式释放 bitmap_block
-        drop(bitmap_block);
+                Ok(())
+            })??;
+            // bitmap_block 在此处自动释放并写回
+        }
+
+        // 第三步：更新块组描述符
+        {
+            let mut bg_ref = BlockGroupRef::get(bdev, sb, bg_id)?;
+            bg_ref.inc_free_blocks(free_cnt)?;
+            // bg_ref 在此处自动释放并写回
+        }
 
         // 更新计数
         remaining -= free_cnt;
@@ -165,14 +178,6 @@ pub fn free_blocks<D: BlockDevice>(
         let mut sb_free_blocks = sb.free_blocks_count();
         sb_free_blocks += free_cnt as u64;
         sb.set_free_blocks_count(sb_free_blocks);
-
-        // 更新块组空闲块计数
-        let mut free_blocks = bg.get_free_blocks_count(sb);
-        free_blocks += free_cnt;
-        bg.set_free_blocks_count(sb, free_blocks);
-
-        // 写回块组描述符
-        bg.write(bdev, sb)?;
     }
 
     // 写回 superblock

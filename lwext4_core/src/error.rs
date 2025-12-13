@@ -33,11 +33,22 @@ pub enum ErrorKind {
     Unsupported,
     /// 设备忙
     Busy,
+    /// 无效状态
+    InvalidState,
+    /// 目录非空
+    NotEmpty,
 }
 
 impl Error {
     /// 创建新错误
     pub const fn new(kind: ErrorKind, message: &'static str) -> Self {
+        Self { kind, message }
+    }
+
+    /// 创建带原因的错误（简化版，忽略 cause）
+    ///
+    /// 注意：在 no_std 环境下，cause 参数会被忽略
+    pub fn with_cause(kind: ErrorKind, message: &'static str, _cause: impl core::fmt::Debug) -> Self {
         Self { kind, message }
     }
 

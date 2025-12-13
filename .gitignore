@@ -1,3 +1,5 @@
 /target
 devlogs
 deprecated*
+/lwext4_arce/target
+/lwext4_core/target

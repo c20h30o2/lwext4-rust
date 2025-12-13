@@ -179,13 +179,13 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     /// ```
     pub fn read_dir(&mut self, path: &str) -> Result<Vec<DirEntry>> {
         let inode_num = lookup_path(&mut self.bdev, &self.sb, path)?;
-        let inode = Inode::load(&mut self.bdev, &self.sb, inode_num)?;
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &self.sb, inode_num)?;
 
-        if !inode.is_dir() {
+        if !inode_ref.is_dir()? {
             return Err(Error::new(ErrorKind::InvalidInput, "Not a directory"));
         }
 
-        read_dir(&mut self.bdev, &self.sb, &inode)
+        read_dir(&mut inode_ref)
     }
 
     /// 获取文件元数据

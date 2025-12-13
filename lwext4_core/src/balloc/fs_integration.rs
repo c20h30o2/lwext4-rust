@@ -3,9 +3,10 @@
 //! 提供与 InodeRef 集成的块分配/释放函数，自动更新 inode blocks 计数
 
 use crate::{
-    block::BlockDevice,
+    block::{BlockDev, BlockDevice},
     error::Result,
     fs::{BlockGroupRef, InodeRef},
+    superblock::Superblock,
 };
 
 use super::{alloc::*, free::*};
@@ -16,6 +17,8 @@ use super::{alloc::*, free::*};
 ///
 /// # 参数
 ///
+/// * `bdev` - 块设备引用
+/// * `sb` - superblock 引用
 /// * `inode_ref` - inode 引用（会自动更新 blocks 计数）
 /// * `baddr` - 要释放的块地址
 ///
@@ -23,14 +26,16 @@ use super::{alloc::*, free::*};
 ///
 /// 成功返回 ()
 pub fn free_block_with_inode<D: BlockDevice>(
+    bdev: &mut BlockDev<D>,
+    sb: &mut Superblock,
     inode_ref: &mut InodeRef<D>,
     baddr: u64,
 ) -> Result<()> {
     // 先释放块
-    free_block(inode_ref.bdev, inode_ref.sb, baddr)?;
+    free_block(bdev, sb, baddr)?;
 
     // 更新 inode blocks 计数
-    inode_ref.sub_blocks(1);
+    inode_ref.sub_blocks(1)?;
 
     Ok(())
 }
@@ -41,6 +46,8 @@ pub fn free_block_with_inode<D: BlockDevice>(
 ///
 /// # 参数
 ///
+/// * `bdev` - 块设备引用
+/// * `sb` - superblock 引用
 /// * `inode_ref` - inode 引用（会自动更新 blocks 计数）
 /// * `first` - 第一个要释放的块地址
 /// * `count` - 要释放的块数量
@@ -49,15 +56,17 @@ pub fn free_block_with_inode<D: BlockDevice>(
 ///
 /// 成功返回 ()
 pub fn free_blocks_with_inode<D: BlockDevice>(
+    bdev: &mut BlockDev<D>,
+    sb: &mut Superblock,
     inode_ref: &mut InodeRef<D>,
     first: u64,
     count: u32,
 ) -> Result<()> {
     // 先释放块
-    free_blocks(inode_ref.bdev, inode_ref.sb, first, count)?;
+    free_blocks(bdev, sb, first, count)?;
 
     // 更新 inode blocks 计数
-    inode_ref.sub_blocks(count);
+    inode_ref.sub_blocks(count)?;
 
     Ok(())
 }
@@ -69,6 +78,8 @@ pub fn free_blocks_with_inode<D: BlockDevice>(
 /// # 参数
 ///
 /// * `allocator` - 块分配器
+/// * `bdev` - 块设备引用
+/// * `sb` - superblock 引用
 /// * `inode_ref` - inode 引用（会自动更新 blocks 计数）
 /// * `goal` - 目标块地址（提示）
 ///
@@ -77,14 +88,16 @@ pub fn free_blocks_with_inode<D: BlockDevice>(
 /// 成功返回分配的块地址
 pub fn alloc_block_with_inode<D: BlockDevice>(
     allocator: &mut BlockAllocator,
+    bdev: &mut BlockDev<D>,
+    sb: &mut Superblock,
     inode_ref: &mut InodeRef<D>,
     goal: u64,
 ) -> Result<u64> {
     // 分配块
-    let baddr = allocator.alloc_block(inode_ref.bdev, inode_ref.sb, goal)?;
+    let baddr = allocator.alloc_block(bdev, sb, goal)?;
 
     // 更新 inode blocks 计数
-    inode_ref.add_blocks(1);
+    inode_ref.add_blocks(1)?;
 
     Ok(baddr)
 }
@@ -93,6 +106,8 @@ pub fn alloc_block_with_inode<D: BlockDevice>(
 ///
 /// # 参数
 ///
+/// * `bdev` - 块设备引用
+/// * `sb` - superblock 引用
 /// * `inode_ref` - inode 引用（会自动更新 blocks 计数）
 /// * `baddr` - 要尝试分配的块地址
 ///
@@ -100,15 +115,17 @@ pub fn alloc_block_with_inode<D: BlockDevice>(
 ///
 /// 成功返回 true（块已分配），false（块已被占用）
 pub fn try_alloc_block_with_inode<D: BlockDevice>(
+    bdev: &mut BlockDev<D>,
+    sb: &mut Superblock,
     inode_ref: &mut InodeRef<D>,
     baddr: u64,
 ) -> Result<bool> {
     // 尝试分配块
-    let allocated = try_alloc_block(inode_ref.bdev, inode_ref.sb, baddr)?;
+    let allocated = try_alloc_block(bdev, sb, baddr)?;
 
     // 如果分配成功，更新 inode blocks 计数
     if allocated {
-        inode_ref.add_blocks(1);
+        inode_ref.add_blocks(1)?;
     }
 
     Ok(allocated)

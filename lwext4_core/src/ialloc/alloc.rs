@@ -5,6 +5,7 @@ use crate::{
     block::{Block, BlockDev, BlockDevice},
     block_group::BlockGroup,
     error::{Error, ErrorKind, Result},
+    fs::BlockGroupRef,
     superblock::Superblock,
 };
 
@@ -66,28 +67,29 @@ impl InodeAllocator {
                 continue;
             }
 
-            // 加载块组描述符
-            let mut bg = BlockGroup::load(bdev, sb, bgid)?;
-
-            // 读取必要的值
-            let free_inodes = bg.get_free_inodes_count(sb);
-            let mut used_dirs = bg.get_used_dirs_count(sb);
+            // 第一步：读取块组信息
+            let (free_inodes, used_dirs, bmp_blk_addr, bg_copy) = {
+                let mut bg_ref = BlockGroupRef::get(bdev, sb, bgid)?;
+                let free = bg_ref.free_inodes_count()?;
+                let dirs = bg_ref.used_dirs_count()?;
+                let bitmap_addr = bg_ref.inode_bitmap()?;
+                let bg_data = bg_ref.get_block_group_copy()?;
+                (free, dirs, bitmap_addr, bg_data)
+            };
 
             // 检查此块组是否有空闲 inode
             if free_inodes > 0 {
                 // 计算此块组中的 inode 数（后续需要使用）
                 let inodes_in_bg = inodes_in_group_cnt(sb, bgid);
 
-                // 使用作用域确保 bitmap_block 在后续操作前被释放
+                // 第二步：操作 bitmap
                 let idx_in_bg_opt = {
-                    // 获取位图块句柄
-                    let bmp_blk_addr = bg.get_inode_bitmap(sb);
                     let mut bitmap_block = Block::get(bdev, bmp_blk_addr)?;
 
                     // 在闭包内操作位图数据
                     bitmap_block.with_data_mut(|bitmap_data| {
                         // 验证位图校验和（如果启用）
-                        if !verify_bitmap_csum(sb, &bg, bitmap_data) {
+                        if !verify_bitmap_csum(sb, &bg_copy, bitmap_data) {
                             // 这里只是记录警告，不阻止操作
                         }
 
@@ -103,7 +105,8 @@ impl InodeAllocator {
                         }
 
                         // 更新位图校验和
-                        set_bitmap_csum(sb, &mut bg, bitmap_data);
+                        let mut bg_for_csum = bg_copy;
+                        set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
 
                         Some(idx_in_bg)
                     })?
@@ -119,30 +122,29 @@ impl InodeAllocator {
                     }
                 };
 
-                // 修改文件系统计数器
-                let mut free_inodes_in_bg = free_inodes;
-                if free_inodes_in_bg > 0 {
-                    free_inodes_in_bg -= 1;
+                // 第三步：更新块组描述符
+                {
+                    let mut bg_ref = BlockGroupRef::get(bdev, sb, bgid)?;
+
+                    // 修改文件系统计数器
+                    bg_ref.dec_free_inodes(1)?;
+
+                    // 如果是目录，增加已使用目录计数
+                    if is_dir {
+                        bg_ref.inc_used_dirs()?;
+                    }
+
+                    // 减少未使用的 inode 数
+                    let unused = bg_ref.itable_unused()?;
+                    let free = inodes_in_bg - unused;
+
+                    if idx_in_bg >= free {
+                        let new_unused = inodes_in_bg - (idx_in_bg + 1);
+                        bg_ref.set_itable_unused(new_unused)?;
+                    }
+
+                    // bg_ref 在此处自动释放并写回
                 }
-                bg.set_free_inodes_count(sb, free_inodes_in_bg);
-
-                // 如果是目录，增加已使用目录计数
-                if is_dir {
-                    used_dirs += 1;
-                    bg.set_used_dirs_count(sb, used_dirs);
-                }
-
-                // 减少未使用的 inode 数
-                let mut unused = bg.get_itable_unused(sb);
-                let free = inodes_in_bg - unused;
-
-                if idx_in_bg >= free {
-                    unused = inodes_in_bg - (idx_in_bg + 1);
-                    bg.set_itable_unused(sb, unused);
-                }
-
-                // 写回块组描述符
-                bg.write(bdev, sb)?;
 
                 // 更新 superblock
                 if sb_free_inodes > 0 {

@@ -3,9 +3,9 @@
 //! 对应 lwext4 的位图校验和相关功能
 
 use crate::{
-    block_group::BlockGroup,
     consts::*,
     superblock::Superblock,
+    types::ext4_group_desc,
 };
 
 /// 计算 inode 位图的 CRC32 校验和
@@ -51,9 +51,9 @@ pub fn bitmap_csum(_sb: &Superblock, _bitmap: &[u8]) -> u32 {
 /// # 参数
 ///
 /// * `sb` - superblock 引用
-/// * `bg` - 块组引用
+/// * `bg` - 块组描述符引用
 /// * `bitmap` - 位图数据
-pub fn set_bitmap_csum(sb: &Superblock, bg: &mut BlockGroup, bitmap: &[u8]) {
+pub fn set_bitmap_csum(sb: &Superblock, bg: &mut ext4_group_desc, bitmap: &[u8]) {
     if !sb.has_ro_compat_feature(EXT4_FEATURE_RO_COMPAT_METADATA_CSUM) {
         return;
     }
@@ -63,11 +63,11 @@ pub fn set_bitmap_csum(sb: &Superblock, bg: &mut BlockGroup, bitmap: &[u8]) {
     let hi_csum = ((csum >> 16) & 0xFFFF) as u16;
 
     // 设置低 16 位
-    bg.inner_mut().inode_bitmap_csum_lo = lo_csum.to_le();
+    bg.inode_bitmap_csum_lo = lo_csum.to_le();
 
     // 如果是 64 位描述符，设置高 16 位
     if sb.group_desc_size() == EXT4_MAX_BLOCK_GROUP_DESCRIPTOR_SIZE {
-        bg.inner_mut().inode_bitmap_csum_hi = hi_csum.to_le();
+        bg.inode_bitmap_csum_hi = hi_csum.to_le();
     }
 }
 
@@ -78,14 +78,14 @@ pub fn set_bitmap_csum(sb: &Superblock, bg: &mut BlockGroup, bitmap: &[u8]) {
 /// # 参数
 ///
 /// * `sb` - superblock 引用
-/// * `bg` - 块组引用
+/// * `bg` - 块组描述符引用
 /// * `bitmap` - 位图数据
 ///
 /// # 返回
 ///
 /// 校验和是否正确
 #[cfg(feature = "metadata-csum")]
-pub fn verify_bitmap_csum(sb: &Superblock, bg: &BlockGroup, bitmap: &[u8]) -> bool {
+pub fn verify_bitmap_csum(sb: &Superblock, bg: &ext4_group_desc, bitmap: &[u8]) -> bool {
     if !sb.has_ro_compat_feature(EXT4_FEATURE_RO_COMPAT_METADATA_CSUM) {
         return true;
     }
@@ -95,13 +95,13 @@ pub fn verify_bitmap_csum(sb: &Superblock, bg: &BlockGroup, bitmap: &[u8]) -> bo
     let hi_csum = ((csum >> 16) & 0xFFFF) as u16;
 
     // 验证低 16 位
-    if u16::from_le(bg.inner().inode_bitmap_csum_lo) != lo_csum {
+    if u16::from_le(bg.inode_bitmap_csum_lo) != lo_csum {
         return false;
     }
 
     // 如果是 64 位描述符，验证高 16 位
     if sb.group_desc_size() == EXT4_MAX_BLOCK_GROUP_DESCRIPTOR_SIZE {
-        if u16::from_le(bg.inner().inode_bitmap_csum_hi) != hi_csum {
+        if u16::from_le(bg.inode_bitmap_csum_hi) != hi_csum {
             return false;
         }
     }
@@ -111,7 +111,7 @@ pub fn verify_bitmap_csum(sb: &Superblock, bg: &BlockGroup, bitmap: &[u8]) -> bo
 
 /// 占位实现：当未启用 metadata-csum 功能时，总是返回 true
 #[cfg(not(feature = "metadata-csum"))]
-pub fn verify_bitmap_csum(_sb: &Superblock, _bg: &BlockGroup, _bitmap: &[u8]) -> bool {
+pub fn verify_bitmap_csum(_sb: &Superblock, _bg: &ext4_group_desc, _bitmap: &[u8]) -> bool {
     true
 }
 
