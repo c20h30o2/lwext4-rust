@@ -123,6 +123,21 @@ impl Inode {
         Ok(Self { inner, inode_num })
     }
 
+    /// 从原始 inode 数据创建
+    ///
+    /// # 参数
+    ///
+    /// * `inner` - ext4_inode 结构
+    /// * `inode_num` - inode 编号
+    ///
+    /// # 注意
+    ///
+    /// 此方法用于从已有的 ext4_inode 数据创建 Inode 实例，
+    /// 主要用于临时需要 Inode 接口的场景（如 extent tree 操作）
+    pub fn from_raw(inner: ext4_inode, inode_num: u32) -> Self {
+        Self { inner, inode_num }
+    }
+
     /// 获取 inode 编号
     pub fn inode_num(&self) -> u32 {
         self.inode_num

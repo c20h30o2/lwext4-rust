@@ -1,0 +1,31 @@
+block/device.rs 提供函数直接调用device接口对设备进行读写
+
+block/io.rs 提供函数交互cache的读写，读写都先操作cache,若对应块的cache则调用设备接口载入cache， 
+但io.rs所有函数都需要提供vec buffer, 从vec buffer读入数据写到cache 或者从cache读出数据写到vec buffer
+
+block/handle 可以提供对某块cache的引用， 保证一致性 
+
+1. 调整上层从device读写块的方式， 应当以使用block handle 为主， 直接持有并操作cache， 
+而不是声明一个vec数组然后调用read_bytes write_bytes, 这样仅仅是将cache数据拷贝到vec中， 可能存在不一致问题
+
+2. block handle中会确认是否启用cache， 而在其调用的read_block中会再次进行确认， 是否可以简化
+
+3. 提供了不使用块cache的模式， 但是感觉很不靠谱， 从数据一致性各个方面来讲都不靠谱， 需要进一步测试或者直接不再提供这个模式 
+
+4. 考虑inode block_group 这两个包装还是否有用，似乎已经被inoderef gpref给替代了
+
+5. 考虑是否将crc提取出来作为单独模块
+
+6. 将不必要的目录的跟踪从git中移除 如lwext4_core/target
+
+7. 挖掘lwext4的目录索引逻辑，ext4的目录索引最初都是线性索引，文件数增多到一定程度才会转为htree,这在lwext4中如何体现，如何从线性变换到htree 以及htree的level如何增长 ，以及每一级映射中存储的hash-block如何分配， 尤其是hash如何分配
+
+8. 判断是否有必要实现索引递归分裂， 按理说lwext4最多也只到level1， 只存在两种分裂情况， 只需要一个分裂函数就能解决， 没有需要处理递归分裂的场景
+
+9. 考虑为extent 的ext4_new_meta_blocks、 ext4_ext_free_blocks 提供比lwext4更多的策略（比如提供更接近linux的实现）， 目前lwext4中这两个函数的count、flags参数都为扩展功能预留
+
+10. 实现transaction的getblock与setblock,比如ext4_trans_block_get函数，与lwext4类似，将获取与释放block与日志结合， 或者可以用rust特性更优雅地实现释放
+
+11. extent存放的问题 ext4_ext_can_prepend中为什么只判断x1是否已写入,而不继续判断x2， ext4假定x1 x2写入属性相同，为什么, 不同写入属性的extent能否共存在一个索引节点中？能否合并？
+
+12. 检查lwext4中ext4_ext_insert_leaf前置合并的ext4_ext_correct_indexes问题，看看是否存在bug

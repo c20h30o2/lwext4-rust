@@ -85,7 +85,7 @@ fn test_block_device_creation() {
     let test_image = "/home/c20h30o2/files/lwext4-rust/lwext4-rust/test-images/test.ext4";
     let device = FileBlockDevice::open(test_image).expect("Failed to open test image");
 
-    let bdev = BlockDev::new(device);
+    let bdev = BlockDev::new(device).expect("Failed to create BlockDev");
 
     assert_eq!(bdev.block_size(), LOGICAL_BLOCK_SIZE);
     assert_eq!(bdev.sector_size(), PHYSICAL_BLOCK_SIZE);
@@ -99,7 +99,7 @@ fn test_block_read_write() {
     let test_image = "/home/c20h30o2/files/lwext4-rust/lwext4-rust/test-images/test.ext4";
     let device = FileBlockDevice::open(test_image).expect("Failed to open test image");
 
-    let mut bdev = BlockDev::new(device);
+    let mut bdev = BlockDev::new(device).expect("Failed to create BlockDev");
 
     // 测试读取第一个块
     let mut buf = vec![0u8; LOGICAL_BLOCK_SIZE as usize];
@@ -118,7 +118,7 @@ fn test_byte_level_read() {
     let test_image = "/home/c20h30o2/files/lwext4-rust/lwext4-rust/test-images/test.ext4";
     let device = FileBlockDevice::open(test_image).expect("Failed to open test image");
 
-    let mut bdev = BlockDev::new(device);
+    let mut bdev = BlockDev::new(device).expect("Failed to create BlockDev");
 
     // 测试字节级读取
     let mut buf = vec![0u8; 100];
@@ -137,7 +137,7 @@ fn test_statistics() {
     let test_image = "/home/c20h30o2/files/lwext4-rust/lwext4-rust/test-images/test.ext4";
     let device = FileBlockDevice::open(test_image).expect("Failed to open test image");
 
-    let mut bdev = BlockDev::new(device);
+    let mut bdev = BlockDev::new(device).expect("Failed to create BlockDev");
 
     assert_eq!(bdev.read_count(), 0);
     assert_eq!(bdev.write_count(), 0);

@@ -133,6 +133,21 @@ impl Superblock {
         (u32::from_le(self.inner.feature_ro_compat) & feature) != 0
     }
 
+    /// 检查 superblock flags
+    pub fn has_flag(&self, flag: u32) -> bool {
+        (u32::from_le(self.inner.flags) & flag) != 0
+    }
+
+    /// 获取 hash seed（用于 HTree）
+    pub fn hash_seed(&self) -> [u32; 4] {
+        [
+            u32::from_le(self.inner.hash_seed[0]),
+            u32::from_le(self.inner.hash_seed[1]),
+            u32::from_le(self.inner.hash_seed[2]),
+            u32::from_le(self.inner.hash_seed[3]),
+        ]
+    }
+
     /// 检查是否使用 extent
     pub fn has_extents(&self) -> bool {
         self.has_incompat_feature(EXT4_FEATURE_INCOMPAT_EXTENTS)

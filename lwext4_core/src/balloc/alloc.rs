@@ -7,6 +7,7 @@ use crate::{
     block::{Block, BlockDev, BlockDevice},
     block_group::BlockGroup,
     error::{Error, ErrorKind, Result},
+    fs::BlockGroupRef,
     superblock::Superblock,
 };
 
@@ -50,16 +51,19 @@ impl BlockAllocator {
         sb: &mut Superblock,
         goal: u64,
     ) -> Result<u64> {
-        // 加载目标块组
+        // 计算目标块组
         let bg_id = get_bgid_of_block(sb, goal);
         let idx_in_bg = addr_to_idx_bg(sb, goal);
 
-        // 尝试在目标块组中分配
-        let mut bg = BlockGroup::load(bdev, sb, bg_id)?;
+        // 检查目标块组是否有空闲块
+        let free_blocks = {
+            let mut bg_ref = BlockGroupRef::get(bdev, sb, bg_id)?;
+            bg_ref.free_blocks_count()?
+        };
 
-        let free_blocks = bg.get_free_blocks_count(sb);
+        // 尝试在目标块组中分配
         if free_blocks > 0 {
-            if let Some(alloc) = self.try_alloc_in_group(bdev, sb, &mut bg, bg_id, idx_in_bg)? {
+            if let Some(alloc) = self.try_alloc_in_group(bdev, sb, bg_id, idx_in_bg)? {
                 self.last_block_bg_id = bg_id;
                 return Ok(alloc);
             }
@@ -71,15 +75,18 @@ impl BlockAllocator {
         let mut count = block_group_count - 1; // 已经尝试过一个了
 
         while count > 0 {
-            let mut bg = BlockGroup::load(bdev, sb, bgid)?;
-            let free_blocks = bg.get_free_blocks_count(sb);
+            // 检查此块组是否有空闲块
+            let free_blocks = {
+                let mut bg_ref = BlockGroupRef::get(bdev, sb, bgid)?;
+                bg_ref.free_blocks_count()?
+            };
 
             if free_blocks > 0 {
                 // 计算此块组的起始索引
                 let first_in_bg = get_block_of_bgid(sb, bgid);
                 let idx_in_bg = addr_to_idx_bg(sb, first_in_bg);
 
-                if let Some(alloc) = self.try_alloc_in_group(bdev, sb, &mut bg, bgid, idx_in_bg)? {
+                if let Some(alloc) = self.try_alloc_in_group(bdev, sb, bgid, idx_in_bg)? {
                     self.last_block_bg_id = bgid;
                     return Ok(alloc);
                 }
@@ -97,7 +104,6 @@ impl BlockAllocator {
         &self,
         bdev: &mut BlockDev<D>,
         sb: &mut Superblock,
-        bg: &mut BlockGroup,
         bgid: u32,
         mut idx_in_bg: u32,
     ) -> Result<Option<u64>> {
@@ -112,53 +118,69 @@ impl BlockAllocator {
             idx_in_bg = first_in_bg_index;
         }
 
-        // 获取位图块地址
-        let bmp_blk_addr = bg.get_block_bitmap(sb);
-        let mut bitmap_block = Block::get(bdev, bmp_blk_addr)?;
+        // 第一步：获取位图地址和块组描述符副本
+        let (bmp_blk_addr, bg_copy) = {
+            let mut bg_ref = BlockGroupRef::get(bdev, sb, bgid)?;
+            let bitmap_addr = bg_ref.block_bitmap()?;
+            let bg_data = bg_ref.get_block_group_copy()?;
+            (bitmap_addr, bg_data)
+        };
 
-        let alloc_opt = bitmap_block.with_data_mut(|bitmap_data| {
-            // 验证位图校验和
-            if !verify_bitmap_csum(sb, bg, bitmap_data) {
-                // 记录警告但继续
-            }
+        // 第二步：操作位图
+        let alloc_opt = {
+            let mut bitmap_block = Block::get(bdev, bmp_blk_addr)?;
 
-            // 1. 检查目标位置是否空闲
-            if !bitmap::test_bit(bitmap_data, idx_in_bg) {
-                set_bit(bitmap_data, idx_in_bg)?;
-                set_bitmap_csum(sb, bg, bitmap_data);
-                return Ok(Some(idx_in_bg));
-            }
-
-            // 2. 在目标附近查找（+63 范围内）
-            let mut end_idx = (idx_in_bg + 63) & !63;
-            if end_idx > blk_in_bg {
-                end_idx = blk_in_bg;
-            }
-
-            for tmp_idx in (idx_in_bg + 1)..end_idx {
-                if !bitmap::test_bit(bitmap_data, tmp_idx) {
-                    set_bit(bitmap_data, tmp_idx)?;
-                    set_bitmap_csum(sb, bg, bitmap_data);
-                    return Ok(Some(tmp_idx));
+            bitmap_block.with_data_mut(|bitmap_data| {
+                // 验证位图校验和
+                if !verify_bitmap_csum(sb, &bg_copy, bitmap_data) {
+                    // 记录警告但继续
                 }
-            }
 
-            // 3. 在整个块组中查找
-            if let Some(rel_blk_idx) = find_first_zero(bitmap_data, idx_in_bg, blk_in_bg) {
-                set_bit(bitmap_data, rel_blk_idx)?;
-                set_bitmap_csum(sb, bg, bitmap_data);
-                return Ok(Some(rel_blk_idx));
-            }
+                // 1. 检查目标位置是否空闲
+                if !bitmap::test_bit(bitmap_data, idx_in_bg) {
+                    set_bit(bitmap_data, idx_in_bg)?;
+                    let mut bg_for_csum = bg_copy;
+                    set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
+                    return Ok(Some(idx_in_bg));
+                }
 
-            Ok(None)
-        })??;
+                // 2. 在目标附近查找（+63 范围内）
+                let mut end_idx = (idx_in_bg + 63) & !63;
+                if end_idx > blk_in_bg {
+                    end_idx = blk_in_bg;
+                }
 
-        // 显式释放 bitmap_block
-        drop(bitmap_block);
+                for tmp_idx in (idx_in_bg + 1)..end_idx {
+                    if !bitmap::test_bit(bitmap_data, tmp_idx) {
+                        set_bit(bitmap_data, tmp_idx)?;
+                        let mut bg_for_csum = bg_copy;
+                        set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
+                        return Ok(Some(tmp_idx));
+                    }
+                }
+
+                // 3. 在整个块组中查找
+                if let Some(rel_blk_idx) = find_first_zero(bitmap_data, idx_in_bg, blk_in_bg) {
+                    set_bit(bitmap_data, rel_blk_idx)?;
+                    let mut bg_for_csum = bg_copy;
+                    set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
+                    return Ok(Some(rel_blk_idx));
+                }
+
+                Ok(None)
+            })??
+        };
 
         if let Some(idx) = alloc_opt {
             // 计算绝对地址
             let alloc = bg_idx_to_addr(sb, idx, bgid);
+
+            // 第三步：更新块组描述符
+            {
+                let mut bg_ref = BlockGroupRef::get(bdev, sb, bgid)?;
+                bg_ref.dec_free_blocks(1)?;
+                // bg_ref 在此处自动释放并写回
+            }
 
             // 更新 superblock 空闲块计数
             let mut sb_free_blocks = sb.free_blocks_count();
@@ -167,14 +189,6 @@ impl BlockAllocator {
             }
             sb.set_free_blocks_count(sb_free_blocks);
             sb.write(bdev)?;
-
-            // 更新块组空闲块计数
-            let mut free_blocks = bg.get_free_blocks_count(sb);
-            if free_blocks > 0 {
-                free_blocks -= 1;
-            }
-            bg.set_free_blocks_count(sb, free_blocks);
-            bg.write(bdev, sb)?;
 
             return Ok(Some(alloc));
         }
@@ -225,37 +239,48 @@ pub fn try_alloc_block<D: BlockDevice>(
     let block_group = get_bgid_of_block(sb, baddr);
     let index_in_group = addr_to_idx_bg(sb, baddr);
 
-    // 加载块组
-    let mut bg = BlockGroup::load(bdev, sb, block_group)?;
+    // 第一步：获取位图地址和块组描述符副本
+    let (bmp_blk_addr, bg_copy) = {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, block_group)?;
+        let bitmap_addr = bg_ref.block_bitmap()?;
+        let bg_data = bg_ref.get_block_group_copy()?;
+        (bitmap_addr, bg_data)
+    };
 
-    // 获取位图块地址
-    let bmp_blk_addr = bg.get_block_bitmap(sb);
-    let mut bitmap_block = Block::get(bdev, bmp_blk_addr)?;
+    // 第二步：操作位图
+    let is_free = {
+        let mut bitmap_block = Block::get(bdev, bmp_blk_addr)?;
 
-    let is_free = bitmap_block.with_data_mut(|bitmap_data| {
-        // 验证位图校验和
-        if !verify_bitmap_csum(sb, &bg, bitmap_data) {
-            // 记录警告但继续
-        }
+        bitmap_block.with_data_mut(|bitmap_data| {
+            // 验证位图校验和
+            if !verify_bitmap_csum(sb, &bg_copy, bitmap_data) {
+                // 记录警告但继续
+            }
 
-        // 检查块是否空闲
-        let free = !bitmap::test_bit(bitmap_data, index_in_group);
+            // 检查块是否空闲
+            let free = !bitmap::test_bit(bitmap_data, index_in_group);
 
-        // 如果空闲，分配它
-        if free {
-            set_bit(bitmap_data, index_in_group)?;
-            set_bitmap_csum(sb, &mut bg, bitmap_data);
-        }
+            // 如果空闲，分配它
+            if free {
+                set_bit(bitmap_data, index_in_group)?;
+                let mut bg_for_csum = bg_copy;
+                set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
+            }
 
-        Ok(free)
-    })??;
-
-    // 显式释放 bitmap_block
-    drop(bitmap_block);
+            Ok(free)
+        })??
+    };
 
     // 如果块不空闲，直接返回
     if !is_free {
         return Ok(false);
+    }
+
+    // 第三步：更新块组描述符
+    {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, block_group)?;
+        bg_ref.dec_free_blocks(1)?;
+        // bg_ref 在此处自动释放并写回
     }
 
     // 更新 superblock 空闲块计数
@@ -265,14 +290,6 @@ pub fn try_alloc_block<D: BlockDevice>(
     }
     sb.set_free_blocks_count(sb_free_blocks);
     sb.write(bdev)?;
-
-    // 更新块组空闲块计数
-    let mut free_blocks = bg.get_free_blocks_count(&sb);
-    if free_blocks > 0 {
-        free_blocks -= 1;
-    }
-    bg.set_free_blocks_count(sb, free_blocks);
-    bg.write(bdev, sb)?;
 
     Ok(true)
 }

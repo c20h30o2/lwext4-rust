@@ -92,6 +92,9 @@ pub mod ialloc;
 /// 块分配
 pub mod balloc;
 
+/// Transaction 系统
+pub mod transaction;
+
 // ===== C API 兼容层（可选）=====
 
 /// C API 兼容层
@@ -121,13 +124,16 @@ pub use block_group::{BlockGroup, read_block_group_desc, write_block_group_desc}
 pub use extent::ExtentTree;
 
 // Dir
-pub use dir::{DirEntry, DirIterator, PathLookup, read_dir, lookup_path, get_inode_by_path};
+pub use dir::{DirEntry, DirIterator, PathLookup, read_dir, lookup_path, get_inode_ref_by_path};
 
 // FileSystem
 pub use fs::{Ext4FileSystem, File, FileMetadata, FileType};
 
 // Cache
 pub use cache::{BlockCache, CacheBuffer, CacheFlags, CacheStats, BufferId, DEFAULT_CACHE_SIZE};
+
+// Transaction
+pub use transaction::SimpleTransaction;
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]

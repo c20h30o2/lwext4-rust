@@ -62,6 +62,15 @@ pub const EXT4_SUPER_STATE_ORPHAN: u16 = 0x0004;
 /// 校验和类型：CRC32C
 pub const EXT4_CHECKSUM_CRC32C: u8 = 1;
 
+/// Superblock flags: Signed directory hash in use
+pub const EXT4_SUPERBLOCK_FLAGS_SIGNED_HASH: u32 = 0x0001;
+
+/// Superblock flags: Unsigned directory hash in use
+pub const EXT4_SUPERBLOCK_FLAGS_UNSIGNED_HASH: u32 = 0x0002;
+
+/// Superblock flags: Test development code
+pub const EXT4_SUPERBLOCK_FLAGS_TEST_FILESYS: u32 = 0x0004;
+
 //=============================================================================
 // Inode 相关
 //=============================================================================
@@ -214,6 +223,9 @@ pub const EXT4_DIR_ENTRY_MIN_LEN: usize = 8;
 
 /// 目录项对齐边界
 pub const EXT4_DIR_ENTRY_ALIGN: usize = 4;
+
+/// 目录校验和类型标志（用于目录项尾部）
+pub const EXT4_DIRENTRY_DIR_CSUM: u8 = 0xDE;
 
 /// 最大文件名长度
 pub const EXT4_NAME_MAX: usize = 255;

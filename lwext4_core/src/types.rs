@@ -259,6 +259,292 @@ pub struct ext4_dir_entry {
     // 后面跟着变长的 name 字段
 }
 
+/// 目录项别名（与 ext4_dir_entry 相同）
+pub type ext4_dir_en = ext4_dir_entry;
+
+//=============================================================================
+// 目录索引（HTree）相关结构
+//=============================================================================
+
+/// HTree 索引计数和限制结构
+///
+/// 对应 ext4 磁盘格式中的 ext4_dir_idx_climit
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_dir_idx_climit {
+    pub limit: u16,                  // 最大条目数
+    pub count: u16,                  // 当前条目数
+}
+
+impl Default for ext4_dir_idx_climit {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_dir_idx_climit {
+    /// 获取限制值
+    pub fn limit(&self) -> u16 {
+        u16::from_le(self.limit)
+    }
+
+    /// 获取计数值
+    pub fn count(&self) -> u16 {
+        u16::from_le(self.count)
+    }
+
+    /// 设置限制值
+    pub fn set_limit(&mut self, val: u16) {
+        self.limit = val.to_le();
+    }
+
+    /// 设置计数值
+    pub fn set_count(&mut self, val: u16) {
+        self.count = val.to_le();
+    }
+}
+
+/// HTree 根节点的点（.）目录项
+///
+/// 对应 ext4 磁盘格式中的 ext4_fake_dir_entry
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_dir_idx_dot_en {
+    pub inode: u32,                  // inode 编号
+    pub entry_len: u16,              // 记录长度
+    pub name_len: u8,                // 名称长度（1 for "."）
+    pub inode_type: u8,              // 文件类型
+    pub name: [u8; 4],               // 名称 ".\0\0\0"
+}
+
+impl Default for ext4_dir_idx_dot_en {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_dir_idx_dot_en {
+    /// 获取 inode 号
+    pub fn inode(&self) -> u32 {
+        u32::from_le(self.inode)
+    }
+
+    /// 获取记录长度
+    pub fn entry_len(&self) -> u16 {
+        u16::from_le(self.entry_len)
+    }
+}
+
+/// HTree 根信息结构
+///
+/// 对应 ext4 磁盘格式中的 ext4_dir_idx_root_info
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_dir_idx_rinfo {
+    pub reserved_zero: u32,          // 保留字段，必须为 0
+    pub hash_version: u8,            // 哈希版本
+    pub info_length: u8,             // 信息长度（8字节）
+    pub indirect_levels: u8,         // 间接层数
+    pub unused_flags: u8,            // 未使用的标志
+}
+
+impl Default for ext4_dir_idx_rinfo {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_dir_idx_rinfo {
+    /// 获取哈希版本
+    pub fn hash_version(&self) -> u8 {
+        self.hash_version
+    }
+
+    /// 获取信息长度
+    pub fn info_length(&self) -> u8 {
+        self.info_length
+    }
+
+    /// 获取间接层数
+    pub fn indirect_levels(&self) -> u8 {
+        self.indirect_levels
+    }
+
+    /// 设置哈希版本
+    pub fn set_hash_version(&mut self, version: u8) {
+        self.hash_version = version;
+    }
+
+    /// 设置信息长度
+    pub fn set_info_length(&mut self, len: u8) {
+        self.info_length = len;
+    }
+
+    /// 设置间接层数
+    pub fn set_indirect_levels(&mut self, levels: u8) {
+        self.indirect_levels = levels;
+    }
+}
+
+/// HTree 索引条目
+///
+/// 对应 ext4 磁盘格式中的 ext4_dir_idx_entry
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_dir_idx_entry {
+    pub hash: u32,                   // 哈希值
+    pub block: u32,                  // 块号
+}
+
+impl Default for ext4_dir_idx_entry {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_dir_idx_entry {
+    /// 获取哈希值
+    pub fn hash(&self) -> u32 {
+        u32::from_le(self.hash)
+    }
+
+    /// 获取块号
+    pub fn block(&self) -> u32 {
+        u32::from_le(self.block)
+    }
+
+    /// 设置哈希值
+    pub fn set_hash(&mut self, hash: u32) {
+        self.hash = hash.to_le();
+    }
+
+    /// 设置块号
+    pub fn set_block(&mut self, block: u32) {
+        self.block = block.to_le();
+    }
+}
+
+/// HTree 根节点结构
+///
+/// 对应 ext4 磁盘格式中的 ext4_dir_idx_root
+/// 包含 "." 和 ".." 目录项以及根信息和索引条目
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_dir_idx_root {
+    pub dots: [ext4_dir_idx_dot_en; 2], // "." 和 ".." 目录项
+    pub info: ext4_dir_idx_rinfo,    // 根信息
+    pub en: [ext4_dir_idx_entry; 0], // 索引条目数组（变长）
+}
+
+impl Default for ext4_dir_idx_root {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+/// HTree 索引节点结构
+///
+/// 对应 ext4 磁盘格式中的 ext4_dir_idx_node
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_dir_idx_node {
+    pub fake: ext4_fake_dir_entry,   // 假目录项
+    pub entries: [ext4_dir_idx_entry; 0], // 索引条目数组（变长）
+}
+
+/// 假目录项（用于 HTree 索引节点）
+///
+/// 对应 ext4 磁盘格式中的 ext4_fake_dir_entry
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_fake_dir_entry {
+    pub inode: u32,                  // inode 编号（通常为 0）
+    pub entry_len: u16,              // 记录长度
+    pub name_len: u8,                // 名称长度（0）
+    pub inode_type: u8,              // 文件类型
+}
+
+impl Default for ext4_fake_dir_entry {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl Default for ext4_dir_idx_node {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+/// HTree 索引尾部（校验和）
+///
+/// 对应 ext4 磁盘格式中的 ext4_dir_idx_tail
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_dir_idx_tail {
+    pub reserved: u32,               // 保留字段
+    pub checksum: u32,               // 校验和
+}
+
+impl Default for ext4_dir_idx_tail {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_dir_idx_tail {
+    /// 获取校验和
+    pub fn checksum(&self) -> u32 {
+        u32::from_le(self.checksum)
+    }
+
+    /// 设置校验和
+    pub fn set_checksum(&mut self, csum: u32) {
+        self.checksum = csum.to_le();
+    }
+}
+
+/// 目录项尾部（校验和）
+///
+/// 对应 ext4 磁盘格式中的 ext4_dir_entry_tail
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy)]
+pub struct ext4_dir_entry_tail {
+    pub reserved_zero1: u32,         // 保留字段 1
+    pub rec_len: u16,                // 记录长度（通常为 12）
+    pub reserved_zero2: u8,          // 保留字段 2
+    pub reserved_ft: u8,             // 保留文件类型（0xDE）
+    pub checksum: u32,               // 校验和
+}
+
+impl Default for ext4_dir_entry_tail {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_dir_entry_tail {
+    /// 获取校验和
+    pub fn checksum(&self) -> u32 {
+        u32::from_le(self.checksum)
+    }
+
+    /// 设置校验和
+    pub fn set_checksum(&mut self, csum: u32) {
+        self.checksum = csum.to_le();
+    }
+
+    /// 获取记录长度
+    pub fn rec_len(&self) -> u16 {
+        u16::from_le(self.rec_len)
+    }
+
+    /// 设置记录长度
+    pub fn set_rec_len(&mut self, len: u16) {
+        self.rec_len = len.to_le();
+    }
+}
+
 /// 块组描述符
 ///
 /// 对应 ext4 磁盘格式中的块组描述符 (ext4_group_desc)

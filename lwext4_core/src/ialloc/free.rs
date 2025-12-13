@@ -5,6 +5,7 @@ use crate::{
     block::{Block, BlockDev, BlockDevice},
     block_group::BlockGroup,
     error::{Error, ErrorKind, Result},
+    fs::BlockGroupRef,
     superblock::Superblock,
 };
 
@@ -33,19 +34,27 @@ pub fn free_inode<D: BlockDevice>(
     // 计算块组编号
     let block_group = get_bgid_of_inode(sb, inode);
 
-    // 加载块组描述符
-    let mut bg = BlockGroup::load(bdev, sb, block_group)?;
+    // 第一步：操作 bitmap
+    // 需要先获取 bitmap 地址和块组描述符副本（用于校验和）
+    let bitmap_block_addr = {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, block_group)?;
+        bg_ref.inode_bitmap()?
+    };
 
-    // 使用作用域确保 bitmap_block 在后续操作前被释放
+    // 获取块组描述符副本用于校验和验证
+    let bg_copy = {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, block_group)?;
+        bg_ref.get_block_group_copy()?
+    };
+
+    // 操作位图
     {
-        // 获取位图块句柄并操作
-        let bitmap_block_addr = bg.get_inode_bitmap(sb);
         let mut bitmap_block = Block::get(bdev, bitmap_block_addr)?;
 
         // 在闭包内操作位图数据
         bitmap_block.with_data_mut(|bitmap_data| {
             // 验证位图校验和（如果启用）
-            if !verify_bitmap_csum(sb, &bg, bitmap_data) {
+            if !verify_bitmap_csum(sb, &bg_copy, bitmap_data) {
                 // 这里只是记录警告，不阻止操作
                 // 在实际应用中可以添加日志
             }
@@ -55,29 +64,29 @@ pub fn free_inode<D: BlockDevice>(
             clear_bit(bitmap_data, index_in_group)?;
 
             // 更新位图校验和
-            set_bitmap_csum(sb, &mut bg, bitmap_data);
+            // 注意：这里我们需要一个可变的 BlockGroup 副本
+            let mut bg_for_csum = bg_copy;
+            set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
 
             Ok(())
         })??;
         // bitmap_block 在此处自动释放并写回
     }
 
-    // 如果释放的是目录，递减已使用目录计数
-    if is_dir {
-        let mut used_dirs = bg.get_used_dirs_count(sb);
-        if used_dirs > 0 {
-            used_dirs -= 1;
+    // 第二步：更新块组描述符
+    {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, block_group)?;
+
+        // 如果释放的是目录，递减已使用目录计数
+        if is_dir {
+            bg_ref.dec_used_dirs()?;
         }
-        bg.set_used_dirs_count(sb, used_dirs);
+
+        // 更新块组空闲 inode 计数
+        bg_ref.inc_free_inodes(1)?;
+
+        // bg_ref 在此处自动释放并写回
     }
-
-    // 更新块组空闲 inode 计数
-    let mut free_inodes = bg.get_free_inodes_count(sb);
-    free_inodes += 1;
-    bg.set_free_inodes_count(sb, free_inodes);
-
-    // 写回块组描述符
-    bg.write(bdev, sb)?;
 
     // 更新 superblock 空闲 inode 计数
     let sb_free_inodes = sb.free_inodes_count() + 1;
