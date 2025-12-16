@@ -739,3 +739,23 @@ impl ext4_extent_idx {
             | ((u16::from_le(self.leaf_hi) as u64) << 32)
     }
 }
+
+/// Extent 尾部结构
+///
+/// 用于存储 extent 块的 CRC32C 校验和
+/// 位于所有 extent/index 条目之后
+///
+/// 对应 ext4 磁盘格式中的 ext4_extent_tail
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub struct ext4_extent_tail {
+    /// CRC32C 校验和：crc32c(uuid + inum + extent_block)
+    pub checksum: u32,
+}
+
+impl Default for ext4_extent_tail {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}

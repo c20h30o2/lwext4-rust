@@ -29,3 +29,7 @@ block/handle 可以提供对某块cache的引用， 保证一致性
 11. extent存放的问题 ext4_ext_can_prepend中为什么只判断x1是否已写入,而不继续判断x2， ext4假定x1 x2写入属性相同，为什么, 不同写入属性的extent能否共存在一个索引节点中？能否合并？
 
 12. 检查lwext4中ext4_ext_insert_leaf前置合并的ext4_ext_correct_indexes问题，看看是否存在bug
+
+13. 检查是否为cache buf提供了flag的实现，如ext4_bcache_set_flag(block->buf, BC_TMP);
+
+14. 为arceos应用上lwext4可以提供的功能，而不是单纯的读写， 比如应用上xattr 实现文件保护、访问权限控制; 提供日志相关接口 ; mkfs ; mbr  

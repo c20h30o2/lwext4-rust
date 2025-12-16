@@ -377,7 +377,7 @@ pub fn get_blocks<D: BlockDevice>(
 /// - 仅支持深度为 0 的 extent 树
 /// - 不支持节点分裂
 /// - 不支持 extent 合并
-fn insert_extent_simple<D: BlockDevice>(
+pub(crate) fn insert_extent_simple<D: BlockDevice>(
     inode_ref: &mut InodeRef<D>,
     extent: &ext4_extent,
 ) -> Result<()> {

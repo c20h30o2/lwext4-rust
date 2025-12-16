@@ -1,74 +1,50 @@
-# lwext4-rust 重构项目
+# lwext4-rust
 
-纯 Rust 实现的 ext4 文件系统，用于 arceos 操作系统。
+Rust implementation of lwext4 (ext2/3/4 filesystem library)
 
 ## 项目结构
 
 ```
 lwext4-rust/
-├── lwext4_rust/       # 现有的 C FFI 版本（临时依赖）
-├── lwext4_arce/       # arceos 适配层
-│   └── 依赖 lwext4_rust，实现 axfs-ng-vfs 接口
-└── lwext4_core/       # 纯 Rust 核心实现 ✨ 当前开发重点
-    ├── Cargo.toml
-    ├── IMPLEMENTATION_PLAN.md  # 实现计划
-    └── src/
-        ├── lib.rs          # 主入口
-        ├── consts.rs       # 常量定义
-        ├── types.rs        # 数据结构
-        ├── error.rs        # 错误处理
-        ├── superblock.rs   # Superblock 操作
-        ├── inode.rs        # Inode 操作
-        ├── block.rs        # 块操作
-        ├── dir.rs          # 目录操作
-        └── fs.rs           # 文件系统核心
+├── lwext4_core/        # 核心 Rust 实现
+├── lwext4_arce/        # C API 兼容层
+├── docs/               # 📚 所有文档
+└── lwext4/             # 原始 C 代码（参考）
 ```
-
-## 当前状态
-
-✅ **阶段 0：框架搭建**（已完成）
-- 创建模块结构
-- 定义 36 个占位函数
-- 编译通过
-
-⬜ **阶段 1：只读功能**（进行中）
-- Superblock 读取
-- Inode 读取
-- 文件读取
-- 目录遍历
-
-⬜ **阶段 2：写入功能**（计划中）
-
-⬜ **阶段 3：缓存优化**（计划中）
 
 ## 快速开始
 
-### 编译 lwext4-core
-
 ```bash
-cd lwext4_core
+# 构建项目
 cargo build
-```
 
-### 运行测试
-
-```bash
+# 运行测试
 cargo test
+
+# 运行示例
+cargo run --example extent_demo
 ```
 
-### 代码统计
+## 文档
 
-```bash
-find lwext4_core/src -name "*.rs" | xargs wc -l
-# 当前：~715 行
-# 目标：~1200 行（最小实现）
-```
+所有项目文档位于 [`docs/`](./docs/) 目录：
 
-## 开发路线
+- 📖 [说明文档](./docs/guides/) - 使用指南
+- 🏗️ [设计文档](./docs/design/) - 架构和 API 设计
+- 🔨 [开发文档](./docs/development/) - 实现状态和方案
+- 🧪 [测试文档](./docs/testing/) - 测试策略和报告
 
-详见 [lwext4_core/IMPLEMENTATION_PLAN.md](lwext4_core/IMPLEMENTATION_PLAN.md)
+详见 [文档索引](./docs/README.md)
 
-## 贡献
+## 特性
 
-请在实现每个功能后更新 IMPLEMENTATION_PLAN.md 中的复选框。
+- ✅ 完整的 Rust 实现（no_std 支持）
+- ✅ 类型安全的块设备抽象
+- ✅ Extent 树完整支持（100%）
+- ✅ 目录索引（HTree）支持
+- ✅ 事务和日志支持
+- ⏳ C API 兼容层（进行中）
 
+## 许可证
+
+See [LICENSE](./LICENSE)

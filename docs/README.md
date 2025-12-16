@@ -1,193 +1,147 @@
-# lwext4-rust Documentation
+# lwext4-rust 文档索引
 
-Welcome to the lwext4-rust documentation directory!
+本目录包含 lwext4-rust 项目的所有文档，按类型和用途分类组织。
 
-This directory contains all documentation for the lwext4-rust project, organized by topic and purpose.
-
----
-
-## 📂 Directory Structure
+## 📁 文档结构
 
 ```
 docs/
-├── README.md                           ← This file
-├── lwext4-core/                        ← lwext4_core implementation docs
-│   ├── README.md
-│   └── IMPLEMENTATION_PLAN.md          ← Future feature implementation plan
-│
-└── rust-implementation-migration/      ← Pure Rust migration documentation
-    ├── README.md                        ← Migration overview
-    ├── DOCUMENT_INDEX.md                ← Quick reference guide
-    ├── step1-design-analysis/           ← Design decisions (7 docs)
-    ├── step2-type-system-fixes/         ← Type system work (4 docs)
-    ├── step3-function-signature-fixes/  ← Function signatures (3 docs)
-    └── step4-final-verification/        ← Final results (4 docs)
+├── guides/              # 📖 说明文档
+├── design/              # 🏗️ 设计文档
+├── development/         # 🔨 开发过程文档
+└── testing/             # 🧪 测试文档
 ```
 
 ---
 
-## 📚 Documentation Categories
+## 📖 说明文档 (guides/)
 
-### 1. Migration Documentation
-**Directory**: `rust-implementation-migration/`
-**Purpose**: Documents the complete process of migrating lwext4_arce from C FFI to pure Rust implementation
+用户和开发者使用指南。
 
-**Key Documents**:
-- `README.md` - Overall migration summary (34 errors → 0)
-- `DOCUMENT_INDEX.md` - Quick navigation guide
-- `step4-final-verification/FINAL_SUCCESS_SUMMARY.md` ⭐ - Most comprehensive summary
-
-**For**: Understanding how the pure Rust implementation was achieved
-
-### 2. lwext4_core Documentation
-**Directory**: `lwext4-core/`
-**Purpose**: Documentation specific to the lwext4_core crate
-
-**Key Documents**:
-- `README.md` - Overview of lwext4_core status and development workflow
-- `IMPLEMENTATION_PLAN.md` - Roadmap for implementing real functionality
-
-**For**: Developers working on lwext4_core feature implementation
+- **[项目总览](./guides/README.md)** - lwext4-rust 项目介绍
+- **[Claude Code 使用说明](./guides/claude-usage.md)** - 如何使用 Claude Code 进行开发
 
 ---
 
-## 🎯 Quick Start Guide
+## 🏗️ 设计文档 (design/)
 
-### New to the Project?
-Read in this order:
-1. Project `README.md` (root directory)
-2. `rust-implementation-migration/README.md` - Understand what was accomplished
-3. `lwext4-core/README.md` - Understand current status
+架构设计、API 设计和模块设计文档。
 
-### Want to Implement New Features?
-1. `lwext4-core/IMPLEMENTATION_PLAN.md` - See feature roadmap
-2. `rust-implementation-migration/step1-design-analysis/REVISED_DESIGN_PRINCIPLES.md` - Design rules
-3. `rust-implementation-migration/step3-function-signature-fixes/README.md` - Function signature reference
+### 架构设计 (architecture/)
 
-### Debugging Compilation Issues?
-1. `rust-implementation-migration/step2-type-system-fixes/ARCE_ERROR_ANALYSIS.md` - Error patterns
-2. `rust-implementation-migration/step3-function-signature-fixes/SESSION_PROGRESS_SUMMARY.md` - Fix history
-3. `rust-implementation-migration/DOCUMENT_INDEX.md` - Search for specific topics
+- **[Rust 重新设计](./design/architecture/rust-redesign.md)** - 从 C 到 Rust 的重新设计
+- **[API 设计](./design/architecture/api-design.md)** - Rust 惯用 API 设计原则
 
-### Understanding Design Decisions?
-1. `rust-implementation-migration/step1-design-analysis/REVISED_DESIGN_PRINCIPLES.md` - Core principles
-2. `rust-implementation-migration/step1-design-analysis/TWO_APPROACHES_COMPARISON.md` - Approach analysis
-3. `rust-implementation-migration/step4-final-verification/FINAL_SUCCESS_SUMMARY.md` - Complete picture
+### 模块设计 (modules/)
+
+- **[lwext4-core 模块](./design/modules/lwext4-core/)**
+  - [README](./design/modules/lwext4-core/README.md) - 模块概述
+  - [重构状态](./design/modules/lwext4-core/refactoring-status.md)
+  - [实现计划](./design/modules/lwext4-core/implementation-plan.md)
 
 ---
 
-## 📊 Project Status Summary
+## 🔨 开发过程文档 (development/)
 
-### ✅ Completed (as of 2025-12-06)
+开发过程中的状态记录、实现方案和迁移文档。
 
-**Pure Rust Migration**:
-- ✅ All type definitions complete
-- ✅ All function signatures aligned with C API
-- ✅ lwext4_core compiles successfully (0 errors)
-- ✅ lwext4_arce compiles with use-rust feature (0 errors)
-- ✅ Zero breaking changes to public API
+### 实现状态 (status/)
 
-**Code Statistics**:
-- New structures: 3 (ext4_bcache, ext4_blockdev_iface, ext4_dir_search_result)
-- Extended structures: 3 (ext4_inode, ext4_blockdev, ext4_sblock)
-- Fixed function signatures: 15+
-- Error reduction: 34 → 0 (100%)
+跟踪各模块的开发进度。
 
-### ⬜ TODO (Next Phase)
+- **[总体进度](./development/status/overall-progress.md)** - 项目整体实现进度
+- **[FS/Extent/Transaction 状态](./development/status/fs-extent-transaction-status.md)** - 文件系统核心模块状态
+- **[目录 HTree 状态](./development/status/dir-htree-status.md)** - 目录索引实现状态
 
-**Feature Implementation** (from lwext4-core/IMPLEMENTATION_PLAN.md):
-- Phase 1 (P0): Read-only functionality
-  - Superblock reading
-  - Inode reading
-  - Block mapping
-  - File reading
-  - Directory traversal
+### 实现方案 (implementation/)
 
-- Phase 2 (P1): Write functionality
-- Phase 3 (P2): Cache optimization
+具体功能的实现方案和对比分析。
 
-**Estimated Effort**: 40-55 hours (5-7 work days)
+- **[HTree 分裂实现](./development/implementation/htree-split-implementation.md)** - 目录索引分裂算法实现
+- **[目录实现对比](./development/implementation/dir-implementation-comparison.md)** - lwext4 C vs Rust 实现对比
+
+### 迁移过程 (migration/)
+
+从 C 代码到 Rust 的迁移过程记录。
+
+- **[迁移文档索引](./development/migration/rust-implementation-migration/README.md)**
+- **[步骤 1: 设计分析](./development/migration/rust-implementation-migration/step1-design-analysis/)**
+- **[步骤 2: 类型系统修复](./development/migration/rust-implementation-migration/step2-type-system-fixes/)**
+- **[步骤 3: 函数签名修复](./development/migration/rust-implementation-migration/step3-function-signature-fixes/)**
+- **[步骤 4: 最终验证](./development/migration/rust-implementation-migration/step4-final-verification/)**
 
 ---
 
-## 🔍 Document Search by Topic
+## 🧪 测试文档 (testing/)
 
-### Design & Architecture
-- **Design principles**: `rust-implementation-migration/step1-design-analysis/REVISED_DESIGN_PRINCIPLES.md`
-- **C-to-Rust mapping**: `rust-implementation-migration/step1-design-analysis/C_TO_RUST_STRUCTURE_MAPPING.md`
-- **Implementation plan**: `lwext4-core/IMPLEMENTATION_PLAN.md`
+测试策略、测试计划和测试报告。
 
-### Technical Details
-- **Type system**: `rust-implementation-migration/step2-type-system-fixes/`
-- **Function signatures**: `rust-implementation-migration/step3-function-signature-fixes/`
-- **Error analysis**: `rust-implementation-migration/step2-type-system-fixes/ARCE_ERROR_ANALYSIS.md`
+### 测试策略
 
-### Process & History
-- **Migration process**: `rust-implementation-migration/step3-function-signature-fixes/SESSION_PROGRESS_SUMMARY.md`
-- **Complete summary**: `rust-implementation-migration/step4-final-verification/FINAL_SUCCESS_SUMMARY.md`
+- **[测试策略](./testing/strategy.md)** - 整体测试策略和方法
 
-### Testing
-- **Test coverage**: `rust-implementation-migration/step4-final-verification/COVERAGE_TEST_REPORT.md`
-- **Integration tests**: `lwext4-core/IMPLEMENTATION_PLAN.md` (Section: "集成测试计划")
+### 测试计划 (plans/)
+
+- **[HTree 分裂测试计划](./testing/plans/htree-split-test-plan.md)** - 目录索引分裂功能测试计划
+
+### 测试报告 (reports/)
+
+- **[代码覆盖率报告](./testing/reports/coverage-report.md)** - 测试覆盖率分析
 
 ---
 
-## 📝 Documentation Standards
+## 🔍 查找文档
 
-All documentation in this directory follows these standards:
+### 按开发阶段
 
-1. **Format**: Markdown (.md)
-2. **Language**: Mixed Chinese and English
-   - Chinese for explanations and rationale
-   - English for code, technical terms, and file/function names
-3. **Structure**: Clear sections with headers
-4. **Code examples**: Syntax-highlighted Rust/Bash blocks
-5. **Cross-references**: Links to related documents
+- **需求分析阶段**: 查看 `design/` 目录
+- **开发实现阶段**: 查看 `development/status/` 和 `development/implementation/`
+- **测试阶段**: 查看 `testing/` 目录
+- **迁移过程**: 查看 `development/migration/`
 
----
+### 按文档类型
 
-## 🔄 Keeping Documentation Updated
-
-When making changes to the codebase:
-
-1. **New features**: Update `lwext4-core/IMPLEMENTATION_PLAN.md`
-2. **Design changes**: Document in `lwext4-core/` with clear rationale
-3. **Migration insights**: Consider adding to `rust-implementation-migration/`
-4. **Breaking changes**: Update all affected documentation
+- **说明类**: `guides/`
+- **设计类**: `design/`
+- **状态类**: `development/status/`
+- **方案类**: `development/implementation/`
+- **过程类**: `development/migration/`
+- **测试类**: `testing/`
 
 ---
 
-## 📞 Contact & Contribution
+## 📝 文档维护
 
-For questions about documentation:
-- Check `rust-implementation-migration/DOCUMENT_INDEX.md` for quick references
-- Refer to step-specific READMEs for detailed information
+### 添加新文档
 
-When contributing documentation:
-- Follow existing format and structure
-- Add entries to relevant README.md files
-- Update the document index if creating new categories
+1. 确定文档类型（说明/设计/开发/测试）
+2. 放置到相应目录
+3. 更新本索引文件
+4. 使用有意义的文件名（kebab-case）
 
----
+### 文档命名规范
 
-**Documentation Tree**:
-```
-docs/
-├── README.md                                    (This file)
-├── lwext4-core/
-│   ├── README.md                                (lwext4_core overview)
-│   └── IMPLEMENTATION_PLAN.md                   (Feature roadmap)
-└── rust-implementation-migration/
-    ├── README.md                                (Migration overview)
-    ├── DOCUMENT_INDEX.md                        (Quick reference)
-    ├── step1-design-analysis/                   (7 documents)
-    ├── step2-type-system-fixes/                 (4 documents)
-    ├── step3-function-signature-fixes/          (3 documents)
-    └── step4-final-verification/                (4 documents)
+- 使用小写字母和连字符
+- 英文命名，简洁明确
+- 例如：`htree-split-implementation.md`
 
-Total: 22 documentation files
-```
+### 目录规范
+
+- 按文档类型分类
+- 同类文档按主题分组
+- 保持目录结构扁平（避免过深嵌套）
 
 ---
 
-**Last Updated**: 2025-12-06
+## 📊 文档统计
+
+- 📖 说明文档: 2 份
+- 🏗️ 设计文档: 5 份
+- 🔨 开发文档: 30+ 份
+- 🧪 测试文档: 3 份
+
+**总计**: 40+ 份文档
+
+---
+
+最后更新: 2025-12-16
