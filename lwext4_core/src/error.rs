@@ -72,5 +72,20 @@ impl fmt::Display for Error {
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
+// Journal error conversion
+impl From<crate::journal::JournalError> for Error {
+    fn from(err: crate::journal::JournalError) -> Self {
+        use crate::journal::JournalError;
+        match err {
+            JournalError::NoJournalInode => Error::new(ErrorKind::NotFound, "Journal inode not found"),
+            JournalError::InvalidSuperblock => Error::new(ErrorKind::Corrupted, "Invalid journal superblock"),
+            JournalError::UnsupportedFeature(_) => Error::new(ErrorKind::Unsupported, "Unsupported journal feature"),
+            JournalError::RecoveryFailed => Error::new(ErrorKind::InvalidState, "Journal recovery failed"),
+            JournalError::NoSpace => Error::new(ErrorKind::NoSpace, "Journal has no space"),
+            JournalError::IoError => Error::new(ErrorKind::Io, "Journal I/O error"),
+        }
+    }
+}
+
 /// Result 类型别名
 pub type Result<T> = core::result::Result<T, Error>;

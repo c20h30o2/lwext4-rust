@@ -95,6 +95,9 @@ pub mod balloc;
 /// Transaction 系统
 pub mod transaction;
 
+/// Journal (JBD2) 系统
+pub mod journal;
+
 // ===== C API 兼容层（可选）=====
 
 /// C API 兼容层
@@ -134,6 +137,9 @@ pub use cache::{BlockCache, CacheBuffer, CacheFlags, CacheStats, BufferId, DEFAU
 
 // Transaction
 pub use transaction::SimpleTransaction;
+
+// Journal
+pub use journal::{JbdFs, JbdJournal, JbdTrans, JbdBuf, JournalError};
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]

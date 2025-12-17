@@ -68,7 +68,7 @@ pub fn free_inode<D: BlockDevice>(
             let mut bg_for_csum = bg_copy;
             set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
 
-            Ok(())
+            Ok::<_, Error>(())
         })??;
         // bitmap_block 在此处自动释放并写回
     }

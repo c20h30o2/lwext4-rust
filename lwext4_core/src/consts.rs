@@ -237,6 +237,9 @@ pub const EXT4_NAME_MAX: usize = 255;
 /// 兼容特性：目录预分配
 pub const EXT4_FEATURE_COMPAT_DIR_PREALLOC: u32 = 0x0001;
 
+/// 兼容特性：has journal
+pub const EXT4_FEATURE_COMPAT_HAS_JOURNAL: u32 = 0x0004;
+
 /// 兼容特性：resize inode
 pub const EXT4_FEATURE_COMPAT_RESIZE_INODE: u32 = 0x0010;
 

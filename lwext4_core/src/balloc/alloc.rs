@@ -141,7 +141,7 @@ impl BlockAllocator {
                     set_bit(bitmap_data, idx_in_bg)?;
                     let mut bg_for_csum = bg_copy;
                     set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
-                    return Ok(Some(idx_in_bg));
+                    return Ok::<_, Error>(Some(idx_in_bg));
                 }
 
                 // 2. 在目标附近查找（+63 范围内）
@@ -155,7 +155,7 @@ impl BlockAllocator {
                         set_bit(bitmap_data, tmp_idx)?;
                         let mut bg_for_csum = bg_copy;
                         set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
-                        return Ok(Some(tmp_idx));
+                        return Ok::<_, Error>(Some(tmp_idx));
                     }
                 }
 
@@ -164,10 +164,10 @@ impl BlockAllocator {
                     set_bit(bitmap_data, rel_blk_idx)?;
                     let mut bg_for_csum = bg_copy;
                     set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
-                    return Ok(Some(rel_blk_idx));
+                    return Ok::<_, Error>(Some(rel_blk_idx));
                 }
 
-                Ok(None)
+                Ok::<_, Error>(None)
             })??
         };
 
@@ -267,7 +267,7 @@ pub fn try_alloc_block<D: BlockDevice>(
                 set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
             }
 
-            Ok(free)
+            Ok::<_, Error>(free)
         })??
     };
 
