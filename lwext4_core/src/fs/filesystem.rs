@@ -1696,6 +1696,449 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
 
         Ok(())
     }
+
+    // ========== VFS-style Inode-based API ==========
+    //
+    // 这些方法提供基于 inode 编号的操作，适配标准 VFS 接口模式
+
+    /// 使用闭包访问 InodeRef
+    ///
+    /// 提供灵活的 inode 访问方式，自动管理 InodeRef 的生命周期和写回
+    ///
+    /// # 参数
+    ///
+    /// * `inode_num` - inode 编号
+    /// * `f` - 操作闭包，接收 &mut InodeRef
+    ///
+    /// # 返回
+    ///
+    /// 闭包的返回值
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let size = fs.with_inode_ref(inode_num, |inode_ref| {
+    ///     inode_ref.size()
+    /// })?;
+    /// ```
+    pub fn with_inode_ref<F, R>(&mut self, inode_num: u32, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut InodeRef<D>) -> Result<R>,
+    {
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+        f(&mut inode_ref)
+    }
+
+    /// 从指定 inode 的指定偏移量读取数据
+    ///
+    /// # 参数
+    ///
+    /// * `inode_num` - inode 编号
+    /// * `buf` - 目标缓冲区
+    /// * `offset` - 读取起始偏移量（字节）
+    ///
+    /// # 返回
+    ///
+    /// 实际读取的字节数
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let mut buf = vec![0u8; 1024];
+    /// let n = fs.read_at_inode(inode_num, &mut buf, 0)?;
+    /// println!("Read {} bytes", n);
+    /// ```
+    pub fn read_at_inode(&mut self, inode_num: u32, buf: &mut [u8], offset: u64) -> Result<usize> {
+        let inode = {
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+            inode_ref.get_inode()?
+        };
+
+        let file_size = inode.file_size();
+        if offset >= file_size {
+            return Ok(0); // EOF
+        }
+
+        let block_size = self.sb.block_size();
+        let mut extent_tree = crate::extent::ExtentTree::new(&mut self.bdev, block_size);
+        extent_tree.read_file(&inode, offset, buf)
+    }
+
+    /// 向指定 inode 的指定偏移量写入数据
+    ///
+    /// # 参数
+    ///
+    /// * `inode_num` - inode 编号
+    /// * `buf` - 要写入的数据
+    /// * `offset` - 写入起始偏移量（字节）
+    ///
+    /// # 返回
+    ///
+    /// 实际写入的字节数
+    ///
+    /// # 注意
+    ///
+    /// 此方法一次最多写入一个块内的数据，如需写入更多数据，需要多次调用
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let data = b"Hello, World!";
+    /// let n = fs.write_at_inode(inode_num, data, 0)?;
+    /// println!("Wrote {} bytes", n);
+    /// ```
+    pub fn write_at_inode(&mut self, inode_num: u32, buf: &[u8], offset: u64) -> Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        let block_size = self.sb.block_size() as u64;
+        let logical_block = (offset / block_size) as u32;
+        let offset_in_block = (offset % block_size) as usize;
+
+        // 计算本次写入的数据量（不超过当前块的剩余空间）
+        let remaining_in_block = block_size as usize - offset_in_block;
+        let write_len = buf.len().min(remaining_in_block);
+
+        // 获取或分配物理块
+        let physical_block = {
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+            inode_ref.get_inode_dblk_idx(logical_block, true)? // create=true 自动分配
+        }; // inode_ref 在此 drop，自动写回修改
+
+        if physical_block == 0 {
+            return Err(Error::new(
+                ErrorKind::NoSpace,
+                "Failed to allocate block for write",
+            ));
+        }
+
+        // 读取整个块
+        let mut block_buf = alloc::vec![0u8; block_size as usize];
+        self.bdev.read_block(physical_block, &mut block_buf)?;
+
+        // 在块内写入数据
+        block_buf[offset_in_block..offset_in_block + write_len]
+            .copy_from_slice(&buf[..write_len]);
+
+        // 写回块
+        self.bdev.write_block(physical_block, &block_buf)?;
+
+        // 更新文件大小（如果写入超过了文件末尾）
+        let new_end = offset + write_len as u64;
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+        let current_size = inode_ref.size()?;
+        if new_end > current_size {
+            inode_ref.set_size(new_end)?;
+            inode_ref.mark_dirty()?;
+        }
+
+        Ok(write_len)
+    }
+
+    /// 获取 inode 的属性（元数据）
+    ///
+    /// # 参数
+    ///
+    /// * `inode_num` - inode 编号
+    ///
+    /// # 返回
+    ///
+    /// FileMetadata 结构，包含文件类型、大小、权限、时间戳等信息
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let attr = fs.get_inode_attr(inode_num)?;
+    /// println!("File size: {}", attr.size);
+    /// println!("Mode: {:o}", attr.mode);
+    /// ```
+    pub fn get_inode_attr(&mut self, inode_num: u32) -> Result<FileMetadata> {
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+
+        let mode = inode_ref.with_inode(|inode| u16::from_le(inode.mode))?;
+        let size = inode_ref.size()?;
+        let links_count = inode_ref.with_inode(|inode| u16::from_le(inode.links_count))?;
+
+        let (uid, gid) = inode_ref.with_inode(|inode| {
+            let uid = (u16::from_le(inode.uid) as u32) | ((u16::from_le(inode.uid_high) as u32) << 16);
+            let gid = (u16::from_le(inode.gid) as u32) | ((u16::from_le(inode.gid_high) as u32) << 16);
+            (uid, gid)
+        })?;
+
+        let (atime, mtime, ctime) = inode_ref.with_inode(|inode| {
+            (
+                u32::from_le(inode.atime) as i64,
+                u32::from_le(inode.mtime) as i64,
+                u32::from_le(inode.ctime) as i64,
+            )
+        })?;
+
+        use crate::consts::*;
+        let file_type = match mode & EXT4_INODE_MODE_TYPE_MASK {
+            EXT4_INODE_MODE_FILE => super::metadata::FileType::RegularFile,
+            EXT4_INODE_MODE_DIRECTORY => super::metadata::FileType::Directory,
+            EXT4_INODE_MODE_SOFTLINK => super::metadata::FileType::Symlink,
+            _ => super::metadata::FileType::Unknown,
+        };
+
+        Ok(FileMetadata {
+            inode_num,
+            file_type,
+            size,
+            permissions: mode & 0o7777,
+            links_count,
+            uid,
+            gid,
+            atime,
+            mtime,
+            ctime,
+        })
+    }
+
+    /// 在指定目录 inode 中查找子项
+    ///
+    /// # 参数
+    ///
+    /// * `parent_inode` - 父目录的 inode 编号
+    /// * `name` - 要查找的名称
+    ///
+    /// # 返回
+    ///
+    /// 找到的子项的 inode 编号
+    ///
+    /// # 错误
+    ///
+    /// - `ErrorKind::NotFound` - 名称不存在
+    /// - `ErrorKind::InvalidInput` - parent_inode 不是目录
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let child_inode = fs.lookup_in_dir(parent_inode, "file.txt")?;
+    /// ```
+    pub fn lookup_in_dir(&mut self, parent_inode: u32, name: &str) -> Result<u32> {
+        // 读取目录条目
+        let entries = {
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, parent_inode)?;
+            if !inode_ref.is_dir()? {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Parent inode is not a directory",
+                ));
+            }
+            read_dir(&mut inode_ref)?
+        };
+
+        // 查找匹配的条目
+        for entry in entries {
+            if entry.name == name {
+                return Ok(entry.inode);
+            }
+        }
+
+        Err(Error::new(
+            ErrorKind::NotFound,
+            "Entry not found in directory",
+        ))
+    }
+
+    /// 在指定目录 inode 中创建新条目
+    ///
+    /// # 参数
+    ///
+    /// * `parent_inode` - 父目录的 inode 编号
+    /// * `name` - 新条目的名称
+    /// * `file_type` - 文件类型（0=未知, 1=文件, 2=目录, 7=符号链接）
+    /// * `mode` - 权限模式
+    ///
+    /// # 返回
+    ///
+    /// 新创建的 inode 编号
+    ///
+    /// # 注意
+    ///
+    /// 此方法会：
+    /// 1. 分配新 inode
+    /// 2. 初始化 inode（设置类型、权限、时间戳）
+    /// 3. 在父目录中添加目录条目
+    /// 4. 如果是目录，初始化 "." 和 ".." 条目
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 创建普通文件 (file_type=1)
+    /// let inode = fs.create_in_dir(parent_inode, "file.txt", 1, 0o644)?;
+    ///
+    /// // 创建目录 (file_type=2)
+    /// let dir_inode = fs.create_in_dir(parent_inode, "mydir", 2, 0o755)?;
+    /// ```
+    pub fn create_in_dir(
+        &mut self,
+        parent_inode: u32,
+        name: &str,
+        file_type: u8,
+        mode: u16,
+    ) -> Result<u32> {
+        use crate::consts::*;
+        use crate::dir::write::{EXT4_DE_DIR, EXT4_DE_REG_FILE, EXT4_DE_SYMLINK};
+
+        // 验证父 inode 是目录
+        {
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, parent_inode)?;
+            if !inode_ref.is_dir()? {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Parent inode is not a directory",
+                ));
+            }
+        }
+
+        // 检查名称是否已存在
+        if self.lookup_in_dir(parent_inode, name).is_ok() {
+            return Err(Error::new(
+                ErrorKind::AlreadyExists,
+                "Entry already exists",
+            ));
+        }
+
+        let is_dir = file_type == EXT4_DE_DIR;
+
+        // 分配新 inode
+        let new_inode = self.alloc_inode(is_dir)?;
+
+        // 初始化 inode
+        {
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, new_inode)?;
+
+            // 设置文件类型和权限
+            let inode_mode = match file_type {
+                EXT4_DE_REG_FILE => EXT4_INODE_MODE_FILE,
+                EXT4_DE_DIR => EXT4_INODE_MODE_DIRECTORY,
+                EXT4_DE_SYMLINK => EXT4_INODE_MODE_SOFTLINK,
+                _ => EXT4_INODE_MODE_FILE, // 默认为普通文件
+            };
+
+            inode_ref.with_inode_mut(|inode| {
+                inode.mode = (inode_mode | mode).to_le();
+                inode.links_count = 1u16.to_le();
+
+                // 设置时间戳
+                let now = 0u32; // TODO: 获取当前时间
+                inode.atime = now.to_le();
+                inode.mtime = now.to_le();
+                inode.ctime = now.to_le();
+            })?;
+
+            inode_ref.set_size(0)?;
+            inode_ref.mark_dirty()?;
+
+            // 如果是目录，初始化目录结构
+            if is_dir {
+                crate::dir::write::dir_init(&mut inode_ref, parent_inode)?;
+            }
+        }
+
+        // 在父目录中添加条目
+        self.add_dir_entry(parent_inode, name, new_inode, file_type)?;
+
+        Ok(new_inode)
+    }
+
+    /// 读取指定目录 inode 的所有条目
+    ///
+    /// # 参数
+    ///
+    /// * `dir_inode` - 目录的 inode 编号
+    ///
+    /// # 返回
+    ///
+    /// 目录条目列表
+    ///
+    /// # 错误
+    ///
+    /// - `ErrorKind::InvalidInput` - inode 不是目录
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let entries = fs.read_dir_from_inode(dir_inode)?;
+    /// for entry in entries {
+    ///     println!("{}: inode {}", entry.name, entry.inode);
+    /// }
+    /// ```
+    pub fn read_dir_from_inode(&mut self, dir_inode: u32) -> Result<Vec<DirEntry>> {
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, dir_inode)?;
+        if !inode_ref.is_dir()? {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Inode is not a directory",
+            ));
+        }
+
+        read_dir(&mut inode_ref)
+    }
+
+    /// 从指定目录 inode 中删除条目
+    ///
+    /// # 参数
+    ///
+    /// * `parent_inode` - 父目录的 inode 编号
+    /// * `name` - 要删除的条目名称
+    ///
+    /// # 返回
+    ///
+    /// 被删除条目的 inode 编号
+    ///
+    /// # 注意
+    ///
+    /// 此方法只删除目录条目，不会：
+    /// - 减少目标 inode 的链接计数
+    /// - 释放目标 inode 的数据块
+    /// - 释放目标 inode 本身
+    ///
+    /// 调用者需要自行处理这些清理工作
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let removed_inode = fs.unlink_from_dir(parent_inode, "file.txt")?;
+    ///
+    /// // 减少链接计数
+    /// let links = fs.with_inode_ref(removed_inode, |inode_ref| {
+    ///     inode_ref.with_inode_mut(|inode| {
+    ///         let links = u16::from_le(inode.links_count);
+    ///         inode.links_count = (links - 1).to_le();
+    ///         Ok(links - 1)
+    ///     })
+    /// })??;
+    ///
+    /// // 如果链接计数为 0，释放 inode
+    /// if links == 0 {
+    ///     fs.truncate_file(removed_inode, 0)?;
+    ///     fs.free_inode(removed_inode, false)?;
+    /// }
+    /// ```
+    pub fn unlink_from_dir(&mut self, parent_inode: u32, name: &str) -> Result<u32> {
+        // 验证父 inode 是目录
+        {
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, parent_inode)?;
+            if !inode_ref.is_dir()? {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Parent inode is not a directory",
+                ));
+            }
+        }
+
+        // 查找要删除的条目
+        let target_inode = self.lookup_in_dir(parent_inode, name)?;
+
+        // 删除目录条目
+        self.remove_dir_entry(parent_inode, name)?;
+
+        Ok(target_inode)
+    }
 }
 
 #[cfg(test)]
