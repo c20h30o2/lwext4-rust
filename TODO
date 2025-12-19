@@ -33,3 +33,9 @@ block/handle 可以提供对某块cache的引用， 保证一致性
 13. 检查是否为cache buf提供了flag的实现，如ext4_bcache_set_flag(block->buf, BC_TMP);
 
 14. 为arceos应用上lwext4可以提供的功能，而不是单纯的读写， 比如应用上xattr 实现文件保护、访问权限控制; 提供日志相关接口 ; mkfs ; mbr  
+
+15. 解决可能存在的架构问题，使其可以应用在多种架构上
+
+16. clippy代码检查
+
+17. 接下来应该参照lwext4的ext4.c再实现一层封装，还是考虑直接尝试将当前项目接入arceos

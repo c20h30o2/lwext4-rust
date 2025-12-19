@@ -759,3 +759,95 @@ impl Default for ext4_extent_tail {
         unsafe { core::mem::zeroed() }
     }
 }
+
+//=============================================================================
+// Extended Attributes (xattr) 结构定义
+//=============================================================================
+
+/// xattr 块头部
+///
+/// 对应 ext4 磁盘格式中的 ext4_xattr_header
+/// 位于独立 xattr 块的开头
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub struct ext4_xattr_header {
+    pub h_magic: u32,       // 魔数：EXT4_XATTR_MAGIC (0xEA020000)
+    pub h_refcount: u32,    // 引用计数（块共享）
+    pub h_blocks: u32,      // 使用的块数（通常为 1）
+    pub h_hash: u32,        // 所有条目的哈希值
+    pub h_checksum: u32,    // CRC32C 校验和
+    pub h_reserved: [u32; 3], // 保留字段
+}
+
+impl Default for ext4_xattr_header {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+/// xattr inode 内部头部
+///
+/// 对应 ext4 磁盘格式中的 ext4_xattr_ibody_header
+/// 位于 inode 的额外空间开头
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub struct ext4_xattr_ibody_header {
+    pub h_magic: u32,       // 魔数：EXT4_XATTR_MAGIC
+}
+
+impl Default for ext4_xattr_ibody_header {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+/// xattr 条目
+///
+/// 对应 ext4 磁盘格式中的 ext4_xattr_entry
+/// 描述一个扩展属性的元数据
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub struct ext4_xattr_entry {
+    pub e_name_len: u8,     // 名称长度
+    pub e_name_index: u8,   // 命名空间索引
+    pub e_value_offs: u16,  // 值在块中的偏移
+    pub e_value_block: u32, // 值所在的块号（未使用，总是 0）
+    pub e_value_size: u32,  // 值的大小
+    pub e_hash: u32,        // 名称和值的哈希
+}
+
+impl Default for ext4_xattr_entry {
+    fn default() -> Self {
+        unsafe { core::mem::zeroed() }
+    }
+}
+
+impl ext4_xattr_entry {
+    /// 获取名称长度
+    pub fn name_len(&self) -> u8 {
+        self.e_name_len
+    }
+
+    /// 获取命名空间索引
+    pub fn name_index(&self) -> u8 {
+        self.e_name_index
+    }
+
+    /// 获取值偏移
+    pub fn value_offs(&self) -> u16 {
+        u16::from_le(self.e_value_offs)
+    }
+
+    /// 获取值大小
+    pub fn value_size(&self) -> u32 {
+        u32::from_le(self.e_value_size)
+    }
+
+    /// 获取哈希值
+    pub fn hash(&self) -> u32 {
+        u32::from_le(self.e_hash)
+    }
+}

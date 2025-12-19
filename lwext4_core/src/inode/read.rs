@@ -317,6 +317,47 @@ impl Inode {
         (u16::from_le(self.inner.gid) as u32)
             | ((u16::from_le(self.inner.gid_high) as u32) << 16)
     }
+
+    /// 获取 ACL 块号
+    ///
+    /// 对应 lwext4 的 `ext4_inode_get_file_acl()`
+    ///
+    /// # 参数
+    ///
+    /// * `sb` - superblock 引用
+    ///
+    /// # 返回
+    ///
+    /// ACL 块号（64位）
+    pub fn get_file_acl(&self, sb: &Superblock) -> u64 {
+        let acl_lo = u32::from_le(self.inner.file_acl_lo) as u64;
+
+        if sb.inner().creator_os == EXT4_SUPERBLOCK_OS_LINUX.to_le() {
+            let acl_hi = u16::from_le(self.inner.file_acl_high) as u64;
+            acl_lo | (acl_hi << 32)
+        } else {
+            acl_lo
+        }
+    }
+
+    /// 获取 inode 额外空间大小
+    ///
+    /// 对应 lwext4 的 `ext4_inode_get_extra_isize()`
+    ///
+    /// # 参数
+    ///
+    /// * `sb` - superblock 引用
+    ///
+    /// # 返回
+    ///
+    /// 额外空间大小（字节）
+    pub fn get_extra_isize(&self, sb: &Superblock) -> u16 {
+        if sb.inode_size() <= EXT4_GOOD_OLD_INODE_SIZE as u16 {
+            0
+        } else {
+            u16::from_le(self.inner.extra_isize)
+        }
+    }
 }
 
 #[cfg(test)]

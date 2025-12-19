@@ -38,7 +38,7 @@ pub fn commit_transaction<D: BlockDevice>(
     jbd_journal: &mut JbdJournal,
     trans: &mut JbdTrans,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
 ) -> Result<()> {
     // 检查事务是否有数据
     if trans.buffer_count() == 0 {
@@ -120,7 +120,7 @@ fn write_descriptor_and_data_blocks<D: BlockDevice>(
     jbd_fs: &JbdFs,
     trans: &JbdTrans,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
     start_jblock: u32,
     uuid: &[u8; 16],
 ) -> Result<u32> {
@@ -228,7 +228,7 @@ fn write_commit_block<D: BlockDevice>(
     jbd_fs: &JbdFs,
     trans: &JbdTrans,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
     commit_jblock: u32,
     uuid: &[u8; 16],
 ) -> Result<()> {
@@ -297,7 +297,7 @@ fn write_revoke_block<D: BlockDevice>(
     jbd_fs: &JbdFs,
     trans: &JbdTrans,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
     revoke_jblock: u32,
     uuid: &[u8; 16],
 ) -> Result<()> {
@@ -369,7 +369,7 @@ pub fn trans_commit<D: BlockDevice>(
     jbd_journal: &mut JbdJournal,
     trans: &mut JbdTrans,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
 ) -> Result<()> {
     commit_transaction(jbd_fs, jbd_journal, trans, bdev, superblock)
 }

@@ -66,7 +66,7 @@ impl JbdFs {
     /// 4. 验证 journal superblock
     pub fn get<D: BlockDevice>(
         bdev: &mut BlockDev<D>,
-        superblock: &Superblock,
+        superblock: &mut Superblock,
     ) -> Result<Self> {
         // 检查是否启用了 HAS_JOURNAL 特性
         if !superblock.has_compat_feature(EXT4_FEATURE_COMPAT_HAS_JOURNAL) {
@@ -120,7 +120,7 @@ impl JbdFs {
     pub fn put<D: BlockDevice>(
         &mut self,
         bdev: &mut BlockDev<D>,
-        superblock: &Superblock,
+        superblock: &mut Superblock,
     ) -> Result<()> {
         if self.dirty {
             self.write_sb(bdev, superblock)?;
@@ -145,7 +145,7 @@ impl JbdFs {
     pub fn inode_bmap<D: BlockDevice>(
         &self,
         bdev: &mut BlockDev<D>,
-        superblock: &Superblock,
+        superblock: &mut Superblock,
         iblock: u32,
     ) -> Result<u64> {
         // 创建临时 InodeRef
@@ -170,7 +170,7 @@ impl JbdFs {
     pub fn recover<D: BlockDevice>(
         &mut self,
         bdev: &mut BlockDev<D>,
-        superblock: &Superblock,
+        superblock: &mut Superblock,
     ) -> Result<()> {
         // 调用 recovery 模块执行实际恢复
         recovery::recover(self, bdev, superblock)
@@ -185,7 +185,7 @@ impl JbdFs {
     fn write_sb<D: BlockDevice>(
         &self,
         bdev: &mut BlockDev<D>,
-        superblock: &Superblock,
+        superblock: &mut Superblock,
     ) -> Result<()> {
         // 创建临时 InodeRef 并获取第一个块的物理地址
         let first_block = {

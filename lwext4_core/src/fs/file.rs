@@ -158,6 +158,115 @@ impl<D: BlockDevice> File<D> {
     pub fn rewind(&mut self) {
         self.offset = 0;
     }
+
+    // ========== 写操作 ==========
+
+    /// 写入数据到文件
+    ///
+    /// 从当前位置写入数据，并更新文件位置
+    ///
+    /// # 参数
+    ///
+    /// * `fs` - 文件系统引用
+    /// * `buf` - 要写入的数据
+    ///
+    /// # 返回
+    ///
+    /// 实际写入的字节数
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let mut file = fs.open("/tmp/test.txt")?;
+    /// let n = file.write(&mut fs, b"Hello, World!")?;
+    /// println!("Wrote {} bytes", n);
+    /// ```
+    pub fn write(&mut self, fs: &mut Ext4FileSystem<D>, buf: &[u8]) -> Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+
+        // 计算当前 offset 对应的逻辑块号和块内偏移
+        let block_size = self.block_size as u64;
+        let logical_block = (self.offset / block_size) as u32;
+        let offset_in_block = (self.offset % block_size) as usize;
+
+        // 计算本次写入的数据量（不超过当前块的剩余空间）
+        let remaining_in_block = block_size as usize - offset_in_block;
+        let write_len = buf.len().min(remaining_in_block);
+
+        // 使用 InodeRef 获取或分配物理块
+        let physical_block = {
+            let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
+            let phys = inode_ref.get_inode_dblk_idx(logical_block, true)?; // create=true 自动分配
+
+            // 更新本地 inode 副本（可能分配了新块，inode 被修改）
+            self.inode = inode_ref.get_inode()?;
+            phys
+        }; // inode_ref 在此 drop，自动写回修改
+
+        if physical_block == 0 {
+            return Err(Error::new(
+                ErrorKind::NoSpace,
+                "Failed to allocate block for write",
+            ));
+        }
+
+        // 读取整个块（如果块是新分配的，会读到全零）
+        let mut block_buf = alloc::vec![0u8; block_size as usize];
+        fs.bdev.read_block(physical_block, &mut block_buf)?;
+
+        // 在块内写入数据
+        block_buf[offset_in_block..offset_in_block + write_len]
+            .copy_from_slice(&buf[..write_len]);
+
+        // 写回块
+        fs.bdev.write_block(physical_block, &block_buf)?;
+
+        // 更新文件位置
+        self.offset += write_len as u64;
+
+        // 如果写入超过了文件末尾，更新文件大小
+        if self.offset > self.inode.file_size() {
+            let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
+            inode_ref.set_size(self.offset)?;
+            inode_ref.mark_dirty()?;
+
+            // 更新本地 inode 副本
+            self.inode = inode_ref.get_inode()?;
+        }
+
+        Ok(write_len)
+    }
+
+    /// 截断文件到指定大小
+    ///
+    /// # 参数
+    ///
+    /// * `fs` - 文件系统引用
+    /// * `size` - 新的文件大小
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// let mut file = fs.open("/tmp/test.txt")?;
+    /// file.truncate(&mut fs, 100)?; // 截断到 100 字节
+    /// ```
+    pub fn truncate(&mut self, fs: &mut Ext4FileSystem<D>, size: u64) -> Result<()> {
+        // 调用文件系统级别的 truncate
+        fs.truncate_file(self.inode_num, size)?;
+
+        // 更新本地 inode 的大小（简化：直接设置，不重新加载）
+        // 注意：这假设 truncate_file 已经更新了磁盘上的 inode
+        self.inode.set_size(size);
+
+        // 如果当前 offset 超过了新大小，调整到文件末尾
+        if self.offset > size {
+            self.offset = size;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

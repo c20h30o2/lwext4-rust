@@ -36,7 +36,7 @@ pub fn do_checkpoint<D: BlockDevice>(
     jbd_fs: &mut JbdFs,
     jbd_journal: &mut JbdJournal,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
 ) -> Result<()> {
     // 如果检查点队列为空，直接返回
     if jbd_journal.checkpoint_queue_len() == 0 {
@@ -109,7 +109,7 @@ fn is_transaction_checkpointable<D: BlockDevice>(
     trans: &JbdTrans,
     _jbd_fs: &JbdFs,
     _bdev: &mut BlockDev<D>,
-    _superblock: &Superblock,
+    _superblock: &mut Superblock,
 ) -> Result<bool> {
     // 检查事务是否有错误
     if trans.has_error() {
@@ -150,7 +150,7 @@ fn checkpoint_transaction<D: BlockDevice>(
     trans: &JbdTrans,
     jbd_fs: &JbdFs,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
 ) -> Result<()> {
     // 注意：在 ordered 或 writeback 模式下，数据可能已经在 commit 之前写入
     // 在 journal 模式下，我们需要从 journal 读取并写回到文件系统
@@ -264,7 +264,7 @@ pub fn force_checkpoint<D: BlockDevice>(
     jbd_fs: &mut JbdFs,
     jbd_journal: &mut JbdJournal,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
 ) -> Result<()> {
     // 循环执行检查点，直到队列为空
     loop {
@@ -340,7 +340,7 @@ pub fn try_checkpoint<D: BlockDevice>(
     jbd_fs: &mut JbdFs,
     jbd_journal: &mut JbdJournal,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
     max_transactions: usize,
 ) -> Result<usize> {
     let mut processed = 0;

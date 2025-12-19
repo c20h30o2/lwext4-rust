@@ -25,12 +25,12 @@ use super::iterator::DirIterator;
 /// 用于根据路径字符串查找 inode
 pub struct PathLookup<'a, D: BlockDevice> {
     bdev: &'a mut BlockDev<D>,
-    sb: &'a Superblock,
+    sb: &'a mut Superblock,
 }
 
 impl<'a, D: BlockDevice> PathLookup<'a, D> {
     /// 创建新的路径查找器
-    pub fn new(bdev: &'a mut BlockDev<D>, sb: &'a Superblock) -> Self {
+    pub fn new(bdev: &'a mut BlockDev<D>, sb: &'a mut Superblock) -> Self {
         Self { bdev, sb }
     }
 
@@ -153,11 +153,11 @@ impl<'a, D: BlockDevice> PathLookup<'a, D> {
 /// # 参数
 ///
 /// * `bdev` - 块设备引用
-/// * `sb` - superblock 引用
+/// * `sb` - superblock 引用（可变）
 /// * `path` - 路径字符串
 pub fn lookup_path<D: BlockDevice>(
     bdev: &mut BlockDev<D>,
-    sb: &Superblock,
+    sb: &mut Superblock,
     path: &str,
 ) -> Result<u32> {
     let mut lookup = PathLookup::new(bdev, sb);
@@ -169,11 +169,11 @@ pub fn lookup_path<D: BlockDevice>(
 /// # 参数
 ///
 /// * `bdev` - 块设备引用
-/// * `sb` - superblock 引用
+/// * `sb` - superblock 引用（可变）
 /// * `path` - 路径字符串
 pub fn get_inode_ref_by_path<'a, D: BlockDevice>(
     bdev: &'a mut BlockDev<D>,
-    sb: &'a Superblock,
+    sb: &'a mut Superblock,
     path: &str,
 ) -> Result<InodeRef<'a, D>> {
     // 先查找 inode 编号

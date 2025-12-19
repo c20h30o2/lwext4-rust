@@ -98,6 +98,9 @@ pub mod transaction;
 /// Journal (JBD2) 系统
 pub mod journal;
 
+/// Extended Attributes (xattr)
+pub mod xattr;
+
 // ===== C API 兼容层（可选）=====
 
 /// C API 兼容层
@@ -140,6 +143,9 @@ pub use transaction::SimpleTransaction;
 
 // Journal
 pub use journal::{JbdFs, JbdJournal, JbdTrans, JbdBuf, JournalError};
+
+// Xattr
+pub use xattr::{list as xattr_list, get as xattr_get, set as xattr_set, remove as xattr_remove};
 
 // C API（当启用时）
 #[cfg(feature = "c-api")]

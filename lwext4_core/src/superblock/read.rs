@@ -183,6 +183,20 @@ impl Superblock {
         core::str::from_utf8(&self.inner.volume_name[..len]).ok()
     }
 
+    /// 获取 UUID
+    ///
+    /// 返回 16 字节的 UUID
+    pub fn uuid(&self) -> &[u8; 16] {
+        &self.inner.uuid
+    }
+
+    /// 检查是否启用元数据校验和
+    ///
+    /// 对应 EXT4_FEATURE_RO_COMPAT_METADATA_CSUM 特性
+    pub fn has_metadata_csum(&self) -> bool {
+        self.has_ro_compat_feature(EXT4_FEATURE_RO_COMPAT_METADATA_CSUM)
+    }
+
     /// 验证文件系统状态
     pub fn is_clean(&self) -> bool {
         const EXT4_VALID_FS: u16 = 0x0001;

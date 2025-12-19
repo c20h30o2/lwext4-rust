@@ -30,7 +30,7 @@ use alloc::vec::Vec;
 pub fn recover<D: BlockDevice>(
     jbd_fs: &mut JbdFs,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
 ) -> Result<()> {
     // 检查是否需要恢复
     // 如果 journal 的 start 等于 first，说明 journal 是空的，不需要恢复
@@ -114,7 +114,7 @@ struct BlockRecord {
 fn scan_journal<D: BlockDevice>(
     jbd_fs: &JbdFs,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
     start: u32,
     mut sequence: u32,
     max_len: u32,
@@ -205,7 +205,7 @@ fn scan_journal<D: BlockDevice>(
 fn scan_descriptor_block<D: BlockDevice>(
     jbd_fs: &JbdFs,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
     desc_block: u32,
     sequence: u32,
 ) -> Result<(TransactionInfo, u32)> {
@@ -261,7 +261,7 @@ fn scan_descriptor_block<D: BlockDevice>(
 fn replay_transaction<D: BlockDevice>(
     jbd_fs: &JbdFs,
     bdev: &mut BlockDev<D>,
-    superblock: &Superblock,
+    superblock: &mut Superblock,
     trans_info: &TransactionInfo,
 ) -> Result<()> {
     // 对于事务中的每个块，将 journal 中的数据写回到文件系统

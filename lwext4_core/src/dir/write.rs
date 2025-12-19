@@ -490,7 +490,15 @@ fn find_and_insert_entry(
             0
         };
 
-        let free_space = rec_len - actual_len;
+        // 使用 checked_sub 避免下溢，如果 actual_len > rec_len 则跳过该条目
+        let free_space = match rec_len.checked_sub(actual_len) {
+            Some(space) => space,
+            None => {
+                // actual_len > rec_len，这个条目可能损坏，跳过
+                offset += rec_len as usize;
+                continue;
+            }
+        };
 
         // 检查是否有足够的空闲空间
         if free_space >= required_len {

@@ -62,6 +62,9 @@ pub const EXT4_SUPER_STATE_ORPHAN: u16 = 0x0004;
 /// 校验和类型：CRC32C
 pub const EXT4_CHECKSUM_CRC32C: u8 = 1;
 
+/// CRC32C 初始值
+pub const EXT4_CRC32_INIT: u32 = !0u32; // 0xFFFFFFFF
+
 /// Superblock flags: Signed directory hash in use
 pub const EXT4_SUPERBLOCK_FLAGS_SIGNED_HASH: u32 = 0x0001;
 
@@ -386,3 +389,34 @@ pub const EXT4_LINK_MAX: u32 = 65000;
 
 /// 每个 inode 的最大 extent 数
 pub const EXT4_EXTENT_MAX_DEPTH: u8 = 5;
+
+//=============================================================================
+// Extended Attributes (xattr) 常量
+//=============================================================================
+
+/// xattr 魔数
+pub const EXT4_XATTR_MAGIC: u32 = 0xEA020000;
+
+/// xattr 最大引用计数
+pub const EXT4_XATTR_REFCOUNT_MAX: u32 = 1024;
+
+/// xattr 对齐（4字节对齐）
+pub const EXT4_XATTR_PAD_BITS: u32 = 2;
+pub const EXT4_XATTR_PAD: u32 = 1 << EXT4_XATTR_PAD_BITS;
+pub const EXT4_XATTR_ROUND: u32 = EXT4_XATTR_PAD - 1;
+
+/// xattr 命名空间索引
+pub const EXT4_XATTR_INDEX_USER: u8 = 1;
+pub const EXT4_XATTR_INDEX_POSIX_ACL_ACCESS: u8 = 2;
+pub const EXT4_XATTR_INDEX_POSIX_ACL_DEFAULT: u8 = 3;
+pub const EXT4_XATTR_INDEX_TRUSTED: u8 = 4;
+pub const EXT4_XATTR_INDEX_LUSTRE: u8 = 5;
+pub const EXT4_XATTR_INDEX_SECURITY: u8 = 6;
+pub const EXT4_XATTR_INDEX_SYSTEM: u8 = 7;
+pub const EXT4_XATTR_INDEX_RICHACL: u8 = 8;
+pub const EXT4_XATTR_INDEX_ENCRYPTION: u8 = 9;
+
+/// 哈希计算相关
+pub const NAME_HASH_SHIFT: u32 = 5;
+pub const VALUE_HASH_SHIFT: u32 = 16;
+pub const BLOCK_HASH_SHIFT: u32 = 16;
