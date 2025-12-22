@@ -65,6 +65,7 @@ fn get_first_entry_offset(header_offset: usize) -> usize {
 /// # 返回
 ///
 /// 如果有效返回 Ok(())，否则返回错误
+/// issue: 这里的参数仍然有优化空间， 使用Inode与切片无法保障一致性
 pub fn validate_ibody_xattr(sb: &Superblock, inode: &Inode, inode_data: &[u8]) -> Result<()> {
     let header_offset = match get_ibody_header_offset(sb, inode) {
         Some(offset) => offset,
@@ -168,6 +169,7 @@ pub fn validate_ibody_xattr(sb: &Superblock, inode: &Inode, inode_data: &[u8]) -
 /// # 返回
 ///
 /// 成功返回 Ok(())
+/// issue: 从未被调用， 且缺乏一致性保障
 pub fn initialize_ibody_xattr(sb: &Superblock, inode: &Inode, inode_data: &mut [u8]) -> Result<()> {
     let header_offset = match get_ibody_header_offset(sb, inode) {
         Some(offset) => offset,

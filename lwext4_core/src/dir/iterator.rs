@@ -114,7 +114,7 @@ impl DirIterator {
     /// 获取下一个目录项
     ///
     /// 对应 lwext4 的 `ext4_dir_iterator_next()` 和相关逻辑
-    ///
+    /// 从该inode的逻辑块0开始遍历
     /// # 参数
     ///
     /// * `inode_ref` - 目录的 inode 引用

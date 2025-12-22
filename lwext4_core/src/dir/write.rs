@@ -230,6 +230,7 @@ fn handle_leaf_split<D: BlockDevice>(
         // No parent in path means this is a root-only tree (indirect_levels == 0)
         // In this case, we need to do a root split which grows the tree
         // For now, return an error (TODO: implement root growth)
+        // issue: if this means inline data?
         return Err(Error::new(
             ErrorKind::NoSpace,
             "Root split not yet implemented in add_entry",
@@ -725,6 +726,7 @@ pub fn append_new_block<D: BlockDevice>(
 /// 在目录的第一个块中创建：
 /// - `.` 条目（指向自己）
 /// - `..` 条目（指向父目录）
+/// issue: 默认block1已分配， 需要检查是否需要优化当前函数以移除默认条件， 或者将该逻辑分发到其他函数， 但要能够确保目录至少有一个块已分配
 pub fn dir_init<D: BlockDevice>(
     dir_inode_ref: &mut InodeRef<D>,
     parent_inode: u32,
@@ -811,6 +813,7 @@ pub fn dir_init<D: BlockDevice>(
 ///
 /// ⚠️ **简化实现**：不自动分配第一个叶子块（块 1）
 /// 叶子块应由调用者在创建目录后立即分配
+/// issue: 1.初始化逻辑不完整 2.这个函数还没有被实际应用到mkdir的逻辑中， 也就是根本还没有被调用过 3.简化实现， 默认block1已经分配， 亟待后续优化
 pub fn dx_init<D: BlockDevice>(
     dir_inode_ref: &mut InodeRef<D>,
     parent_inode: u32,
@@ -980,6 +983,7 @@ pub(super) fn update_dir_block_checksum(
 /// # 返回
 ///
 /// 成功返回 Ok(())，条目不存在返回 NotFound 错误
+/// issue: 这里直接采用遍历所有逻辑块，然后从逻辑块中查找匹配目录项， 有待优化, 应该向lwext4的是实现， 使用上hashinfo
 pub fn remove_entry<D: BlockDevice>(
     inode_ref: &mut InodeRef<D>,
     name: &str,

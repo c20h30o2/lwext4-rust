@@ -5,6 +5,13 @@
 //! 这个模块实现了一个完整的块缓存系统，使用双索引（LBA + LRU）和脏块列表。
 //! 相比 lwext4 的 C 实现（使用嵌入式红黑树），这里使用 Rust 的 `BTreeMap` 和 `VecDeque`，
 //! 提供了更好的类型安全性和内存安全性。
+//! 
+//! cache模块本身不与读磁盘的逻辑交互， 只为写磁盘提供flush接口， cache作为工具为device服务 
+//! 注意： block_cache本身管理cachebuffer并不处理脏块写回磁盘的任务， 只提供flush接口， cachebuffer只在两种情况下被彻底从buffer数组中移除：
+//! 1. 调用evict_one 
+//! 2. 调用drop_buffer 
+//! 这意味着无法再找到对应的lba的cachebuffer, 该lba原来占有的buffer数组槽位已经被标记为None， 只能再次为这个块alloc一个槽位
+//! 并且如上文所说， 这两个函数都不处理脏块写回， 只处理对应的索引的删除任务
 
 use crate::{
     block::BlockDevice,

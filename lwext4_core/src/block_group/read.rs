@@ -3,7 +3,7 @@
 use crate::{
     block::{BlockDev, BlockDevice},
     consts::*,
-    error::{Error, ErrorKind, Result},
+    error::Result,
     superblock::Superblock,
     types::ext4_group_desc,
 };
@@ -20,6 +20,14 @@ use alloc::vec;
 /// # 返回
 ///
 /// 成功返回块组描述符
+///
+/// # 实现说明
+///
+/// 对应 lwext4 的 `ext4_fs_get_block_group_ref()`
+///
+/// 支持两种模式：
+/// - 传统模式：所有块组描述符连续存储在 first_data_block + 1 位置
+/// - META_BG 模式：块组描述符分散存储在各个 meta groups 中
 pub fn read_block_group_desc<D: BlockDevice>(
     bdev: &mut BlockDev<D>,
     sb: &Superblock,
@@ -27,13 +35,65 @@ pub fn read_block_group_desc<D: BlockDevice>(
 ) -> Result<ext4_group_desc> {
     let block_size = sb.block_size() as u64;
     let desc_size = sb.group_desc_size() as u64;
-
-    // 块组描述符表在第一个数据块之后
     let first_data_block = sb.first_data_block() as u64;
-    let gdt_block = first_data_block + 1;
 
-    // 计算描述符的偏移
-    let desc_offset = gdt_block * block_size + (group_num as u64) * desc_size;
+    // 计算每个块可以容纳多少个描述符
+    let desc_per_block = block_size / desc_size;
+
+    // 检查是否启用 META_BG 特性
+    let has_meta_bg = sb.has_incompat_feature(EXT4_FEATURE_INCOMPAT_META_BG);
+    let first_meta_bg = u32::from_le(sb.inner().first_meta_bg);
+
+    let gdt_block: u64;
+    let desc_offset_in_block: u64;
+
+    if has_meta_bg {
+        // META_BG 模式
+        let metagroup = (group_num as u64) / desc_per_block;
+
+        // 检查是否在 META_BG 区域内
+        if metagroup < first_meta_bg as u64 {
+            // 在 first_meta_bg 之前，使用传统方式
+            gdt_block = first_data_block + 1;
+            desc_offset_in_block = (group_num as u64) * desc_size;
+        } else {
+            // 在 META_BG 区域内
+            // META_BG 模式下，每个 metagroup 的块组描述符存储在该 metagroup 的特定位置
+            // 描述符存储在 metagroup 中的第一个、第二个或最后一个块组
+
+            let first_group_in_metagroup = metagroup * desc_per_block;
+            let group_offset_in_metagroup = (group_num as u64) - first_group_in_metagroup;
+
+            // 计算 metagroup 的起始块号
+            let metagroup_start_block = first_group_in_metagroup * sb.blocks_per_group() as u64;
+
+            // META_BG 的 GDT 存储位置：
+            // - 第一个块组的描述符在 metagroup_start + 1
+            // - 第二个块组的描述符在 metagroup_start + blocks_per_group + 1
+            // - 最后一个块组的描述符在 metagroup_start + (desc_per_block - 1) * blocks_per_group + 1
+
+            let gdt_offset_blocks = if group_offset_in_metagroup == 0 {
+                1 // 第一个块组
+            } else if group_offset_in_metagroup == 1 {
+                sb.blocks_per_group() as u64 + 1 // 第二个块组
+            } else if group_offset_in_metagroup == desc_per_block - 1 {
+                (desc_per_block - 1) * sb.blocks_per_group() as u64 + 1 // 最后一个块组
+            } else {
+                // 其他块组的描述符存储在第一个块组的 GDT 中
+                1
+            };
+
+            gdt_block = metagroup_start_block + gdt_offset_blocks;
+            desc_offset_in_block = group_offset_in_metagroup * desc_size;
+        }
+    } else {
+        // 传统模式：所有块组描述符连续存储
+        gdt_block = first_data_block + 1 + ((group_num as u64) * desc_size) / block_size;
+        desc_offset_in_block = ((group_num as u64) * desc_size) % block_size;
+    }
+
+    // 计算最终的字节偏移
+    let desc_offset = gdt_block * block_size + desc_offset_in_block;
 
     // 读取块组描述符
     let mut desc_buf = vec![0u8; core::mem::size_of::<ext4_group_desc>()];

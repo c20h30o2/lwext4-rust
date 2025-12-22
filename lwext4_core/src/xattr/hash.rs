@@ -1,6 +1,7 @@
 //! xattr 哈希和校验和计算
 //!
 //! 提供 entry 哈希、block 哈希和 CRC32C 校验和计算
+//! issue: 该hash还没有真正派上用场， 之后应当完善， 用于实现数据去重（共享存储，新分配的块hash相同时，这些inode可以共享一个xattr block,当需要做修改时再拷贝）、提升查询效率 以及 保障元数据完整性。
 
 use crate::{
     consts::*,

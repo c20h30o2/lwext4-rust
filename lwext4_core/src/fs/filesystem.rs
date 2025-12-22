@@ -254,13 +254,15 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     /// ```
     pub fn open(&mut self, path: &str) -> Result<File<D>> {
         let inode_num = lookup_path(&mut self.bdev, &mut self.sb, path)?;
-        let inode = Inode::load(&mut self.bdev, &self.sb, inode_num)?;
 
-        if !inode.is_file() {
+        // 检查是否是普通文件
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+        if !inode_ref.is_file()? {
             return Err(Error::new(ErrorKind::InvalidInput, "Not a regular file"));
         }
+        drop(inode_ref); // 明确释放
 
-        File::new(&mut self.bdev, &self.sb, inode, inode_num)
+        File::new(&mut self.bdev, &self.sb, inode_num)
     }
 
     /// 读取目录内容
@@ -332,8 +334,8 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     /// * `path` - 路径（绝对路径）
     pub fn is_dir(&mut self, path: &str) -> Result<bool> {
         let inode_num = lookup_path(&mut self.bdev, &mut self.sb, path)?;
-        let inode = Inode::load(&mut self.bdev, &self.sb, inode_num)?;
-        Ok(inode.is_dir())
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+        inode_ref.is_dir()
     }
 
     /// 检查路径是否是普通文件
@@ -343,8 +345,8 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     /// * `path` - 路径（绝对路径）
     pub fn is_file(&mut self, path: &str) -> Result<bool> {
         let inode_num = lookup_path(&mut self.bdev, &mut self.sb, path)?;
-        let inode = Inode::load(&mut self.bdev, &self.sb, inode_num)?;
-        Ok(inode.is_file())
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+        inode_ref.is_file()
     }
 
     // ========== Metadata Write Operations ==========

@@ -4,7 +4,6 @@ use crate::{
     block::{BlockDev, BlockDevice},
     error::{Error, ErrorKind, Result},
     extent::ExtentTree,
-    inode::Inode,
     superblock::Superblock,
 };
 
@@ -13,10 +12,22 @@ use super::filesystem::Ext4FileSystem;
 /// 文件句柄
 ///
 /// 表示一个打开的文件，支持读取和定位操作
+///
+/// # 设计说明
+///
+/// 与旧设计不同，File 不再持有 inode 数据的副本，而是只保存 inode 编号。
+/// 每次需要访问 inode 数据时，都从文件系统临时获取最新数据，确保一致性。
+///
+/// 这种设计的优点：
+/// - **数据一致性**: 总是访问最新的 inode 数据
+/// - **内存效率**: 不复制 ~160 字节的 inode 结构
+/// - **与 lwext4 一致**: lwext4 的 ext4_file 也不持有 inode 数据
 pub struct File<D: BlockDevice> {
-    inode: Inode,
+    /// Inode 编号
     inode_num: u32,
+    /// 当前文件偏移
     offset: u64,
+    /// 块大小（缓存以提高性能）
     block_size: u32,
     _phantom: core::marker::PhantomData<D>,
 }
@@ -26,11 +37,9 @@ impl<D: BlockDevice> File<D> {
     pub(super) fn new(
         _bdev: &mut BlockDev<D>,
         sb: &Superblock,
-        inode: Inode,
         inode_num: u32,
     ) -> Result<Self> {
         Ok(Self {
-            inode,
             inode_num,
             offset: 0,
             block_size: sb.block_size(),
@@ -60,12 +69,24 @@ impl<D: BlockDevice> File<D> {
     /// println!("Read {} bytes", n);
     /// ```
     pub fn read(&mut self, fs: &mut Ext4FileSystem<D>, buf: &mut [u8]) -> Result<usize> {
-        if self.offset >= self.inode.file_size() {
+        // 临时获取 inode 数据以获取文件大小
+        let file_size = {
+            let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
+            inode_ref.size()?
+        };
+
+        if self.offset >= file_size {
             return Ok(0); // EOF
         }
 
+        // 临时获取 inode 数据用于读取
+        let inode = {
+            let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
+            inode_ref.get_inode()?
+        };
+
         let mut extent_tree = ExtentTree::new(&mut fs.bdev, self.block_size);
-        let n = extent_tree.read_file(&self.inode, self.offset, buf)?;
+        let n = extent_tree.read_file(&inode, self.offset, buf)?;
 
         self.offset += n as u64;
 
@@ -90,7 +111,8 @@ impl<D: BlockDevice> File<D> {
     /// let text = String::from_utf8_lossy(&content);
     /// ```
     pub fn read_to_end(&mut self, fs: &mut Ext4FileSystem<D>) -> Result<alloc::vec::Vec<u8>> {
-        let file_size = self.inode.file_size();
+        // 获取文件大小
+        let file_size = self.size(fs)?;
 
         if file_size > usize::MAX as u64 {
             return Err(Error::new(
@@ -118,21 +140,24 @@ impl<D: BlockDevice> File<D> {
     ///
     /// # 参数
     ///
+    /// * `fs` - 文件系统引用
     /// * `pos` - 新的位置（字节偏移）
     ///
     /// # 返回
     ///
     /// 新的位置
     ///
-    /// # 错误
+    /// # 注意
     ///
-    /// 如果位置超出文件大小，返回错误
-    pub fn seek(&mut self, pos: u64) -> Result<u64> {
-        if pos > self.inode.file_size() {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Seek position beyond file size",
-            ));
+    /// 允许 seek 到文件末尾之后，实际读取时会返回 EOF
+    pub fn seek(&mut self, fs: &mut Ext4FileSystem<D>, pos: u64) -> Result<u64> {
+        // 获取文件大小用于验证（可选）
+        let file_size = self.size(fs)?;
+
+        // 允许 seek 到文件大小，但警告超出范围
+        if pos > file_size {
+            // 不返回错误，允许 seek 超过文件末尾
+            // 读取时会返回 EOF
         }
 
         self.offset = pos;
@@ -145,8 +170,13 @@ impl<D: BlockDevice> File<D> {
     }
 
     /// 获取文件大小
-    pub fn size(&self) -> u64 {
-        self.inode.file_size()
+    ///
+    /// # 参数
+    ///
+    /// * `fs` - 文件系统引用
+    pub fn size(&self, fs: &mut Ext4FileSystem<D>) -> Result<u64> {
+        let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
+        inode_ref.size()
     }
 
     /// 获取 inode 编号
@@ -198,11 +228,7 @@ impl<D: BlockDevice> File<D> {
         // 使用 InodeRef 获取或分配物理块
         let physical_block = {
             let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
-            let phys = inode_ref.get_inode_dblk_idx(logical_block, true)?; // create=true 自动分配
-
-            // 更新本地 inode 副本（可能分配了新块，inode 被修改）
-            self.inode = inode_ref.get_inode()?;
-            phys
+            inode_ref.get_inode_dblk_idx(logical_block, true)? // create=true 自动分配
         }; // inode_ref 在此 drop，自动写回修改
 
         if physical_block == 0 {
@@ -227,13 +253,11 @@ impl<D: BlockDevice> File<D> {
         self.offset += write_len as u64;
 
         // 如果写入超过了文件末尾，更新文件大小
-        if self.offset > self.inode.file_size() {
+        let current_size = self.size(fs)?;
+        if self.offset > current_size {
             let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
             inode_ref.set_size(self.offset)?;
             inode_ref.mark_dirty()?;
-
-            // 更新本地 inode 副本
-            self.inode = inode_ref.get_inode()?;
         }
 
         Ok(write_len)
@@ -255,10 +279,6 @@ impl<D: BlockDevice> File<D> {
     pub fn truncate(&mut self, fs: &mut Ext4FileSystem<D>, size: u64) -> Result<()> {
         // 调用文件系统级别的 truncate
         fs.truncate_file(self.inode_num, size)?;
-
-        // 更新本地 inode 的大小（简化：直接设置，不重新加载）
-        // 注意：这假设 truncate_file 已经更新了磁盘上的 inode
-        self.inode.set_size(size);
 
         // 如果当前 offset 超过了新大小，调整到文件末尾
         if self.offset > size {

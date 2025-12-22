@@ -2,49 +2,13 @@
 
 use crate::{
     block::{BlockDev, BlockDevice},
+    block_group,
     consts::*,
     error::{Error, ErrorKind, Result},
     superblock::Superblock,
-    types::{ext4_group_desc, ext4_inode},
+    types::ext4_inode,
 };
 use alloc::vec;
-
-/// 读取块组描述符
-///
-/// # 参数
-///
-/// * `bdev` - 块设备引用
-/// * `sb` - superblock 引用
-/// * `group_num` - 块组编号
-///
-/// # 返回
-///
-/// 成功返回块组描述符
-fn read_block_group_desc<D: BlockDevice>(
-    bdev: &mut BlockDev<D>,
-    sb: &Superblock,
-    group_num: u32,
-) -> Result<ext4_group_desc> {
-    let block_size = sb.block_size() as u64;
-    let desc_size = sb.group_desc_size() as u64;
-
-    // 块组描述符表在第一个数据块之后
-    let first_data_block = sb.first_data_block() as u64;
-    let gdt_block = first_data_block + 1;
-
-    // 计算描述符的偏移
-    let desc_offset = gdt_block * block_size + (group_num as u64) * desc_size;
-
-    // 读取块组描述符
-    let mut desc_buf = vec![0u8; core::mem::size_of::<ext4_group_desc>()];
-    bdev.read_bytes(desc_offset, &mut desc_buf)?;
-
-    let desc = unsafe {
-        core::ptr::read_unaligned(desc_buf.as_ptr() as *const ext4_group_desc)
-    };
-
-    Ok(desc)
-}
 
 /// 从块设备读取 inode
 ///
@@ -78,8 +42,8 @@ pub fn read_inode<D: BlockDevice>(
     let block_group = (inode_num - 1) / inodes_per_group;
     let index_in_group = (inode_num - 1) % inodes_per_group;
 
-    // 读取块组描述符
-    let desc = read_block_group_desc(bdev, sb, block_group)?;
+    // 读取块组描述符（使用公开的版本，支持 META_BG）
+    let desc = block_group::read_block_group_desc(bdev, sb, block_group)?;
 
     // 获取 inode 表的位置
     let inode_table_block = desc.inode_table();

@@ -291,6 +291,7 @@ impl Superblock {
 
         // 9. 校验和验证（如果启用了 METADATA_CSUM 特性）
         // 注意：这里调用 verify_checksum()，实际实现会在 Phase 2 完成
+        // 已完成, 依赖crc32c
         if !self.verify_checksum() {
             return Err(Error::new(
                 ErrorKind::Corrupted,
