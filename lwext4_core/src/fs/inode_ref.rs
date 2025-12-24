@@ -160,6 +160,94 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
         Ok(result)
     }
 
+    /// 访问 inode 原始字节数据（只读）
+    ///
+    /// 提供对完整 inode 区域的字节切片访问，包括 ext4_inode 结构体和额外空间。
+    /// 这对于访问 xattr 等存储在 inode 额外空间的数据很有用。
+    ///
+    /// # 参数
+    ///
+    /// * `f` - 闭包，接收 inode 字节切片（长度为 inode_size）
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// inode_ref.with_inode_raw_data(|inode_data| {
+    ///     // 访问 xattr 数据（在 inode 结构体之后）
+    ///     let xattr_offset = EXT4_GOOD_OLD_INODE_SIZE + extra_isize;
+    ///     let xattr_data = &inode_data[xattr_offset..];
+    ///     // ...
+    /// })?;
+    /// ```
+    pub fn with_inode_raw_data<F, R>(&mut self, f: F) -> Result<R>
+    where
+        F: FnOnce(&[u8]) -> R,
+    {
+        let inode_size = self.sb.inode_size() as usize;
+        let mut block = Block::get(self.bdev, self.inode_block_addr)?;
+        block.with_data(|data| {
+            let start = self.offset_in_block;
+            let end = start + inode_size;
+            let inode_data = &data[start..end];
+            f(inode_data)
+        })
+    }
+
+    /// 访问 inode 原始字节数据（可写）
+    ///
+    /// 提供对完整 inode 区域的可变字节切片访问。
+    /// 修改会自动标记 block 为脏。
+    ///
+    /// # 参数
+    ///
+    /// * `f` - 闭包，接收可变 inode 字节切片（长度为 inode_size）
+    ///
+    /// # 示例
+    ///
+    /// ```ignore
+    /// inode_ref.with_inode_raw_data_mut(|inode_data| {
+    ///     // 修改 xattr 数据
+    ///     let xattr_offset = EXT4_GOOD_OLD_INODE_SIZE + extra_isize;
+    ///     inode_data[xattr_offset..].copy_from_slice(&new_data);
+    /// })?;
+    /// ```
+    pub fn with_inode_raw_data_mut<F, R>(&mut self, f: F) -> Result<R>
+    where
+        F: FnOnce(&mut [u8]) -> R,
+    {
+        let inode_size = self.sb.inode_size() as usize;
+        let mut block = Block::get(self.bdev, self.inode_block_addr)?;
+        let result = block.with_data_mut(|data| {
+            let start = self.offset_in_block;
+            let end = start + inode_size;
+            let inode_data = &mut data[start..end];
+            f(inode_data)
+        })?;
+        self.dirty = true;
+        Ok(result)
+    }
+
+    /// 获取 Superblock 引用（只读）
+    ///
+    /// 注意：xattr 等模块需要访问 superblock 来获取配置信息
+    pub fn superblock(&self) -> &Superblock {
+        self.sb
+    }
+
+    /// 获取块设备可变引用
+    ///
+    /// 注意：此方法仅供内部模块使用（如 xattr 访问 xattr block）
+    pub(crate) fn bdev_mut(&mut self) -> &mut BlockDev<D> {
+        self.bdev
+    }
+
+    /// 获取块设备和 superblock 的可变引用
+    ///
+    /// 用于避免双重借用问题，当需要同时使用 bdev 和 sb 时使用此方法
+    pub(crate) fn bdev_and_sb_mut(&mut self) -> (&mut BlockDev<D>, &mut Superblock) {
+        (self.bdev, self.sb)
+    }
+
     /// 标记为脏（需要写回）
     ///
     /// 注意：修改 inode 时会自动标记为脏，通常不需要手动调用
@@ -560,22 +648,46 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
         Ok(())
     }
 
+    /// 获取 xattr block 地址
+    ///
+    /// 对应 C 的 ext4_inode_get_file_acl()
+    ///
+    /// # 返回
+    ///
+    /// xattr block 的块地址，如果没有则返回 0
+    pub fn get_xattr_block_addr(&mut self) -> Result<u64> {
+        let has_64bit = self.sb.has_incompat_feature(EXT4_FEATURE_INCOMPAT_64BIT);
+        self.with_inode(|inode| {
+            let mut acl = u32::from_le(inode.file_acl_lo) as u64;
+            if has_64bit {
+                acl |= (u16::from_le(inode.file_acl_high) as u64) << 32;
+            }
+            acl
+        })
+    }
+
+    /// 设置 xattr block 地址
+    ///
+    /// 对应 C 的 ext4_inode_set_file_acl()
+    ///
+    /// # 参数
+    ///
+    /// * `addr` - xattr block 的块地址（0 表示删除）
+    pub fn set_xattr_block_addr(&mut self, addr: u64) -> Result<()> {
+        let has_64bit = self.sb.has_incompat_feature(EXT4_FEATURE_INCOMPAT_64BIT);
+        self.with_inode_mut(|inode| {
+            inode.file_acl_lo = (addr as u32).to_le();
+            if has_64bit {
+                inode.file_acl_high = ((addr >> 32) as u16).to_le();
+            }
+        })
+    }
+
     /// 读取 xattr block（如果存在）
     ///
     /// 检查 inode.file_acl 字段，如果非零则读取对应的块
     pub fn read_xattr_block(&mut self) -> Result<Option<alloc::vec::Vec<u8>>> {
-        let has_64bit = self.sb.has_incompat_feature(EXT4_FEATURE_INCOMPAT_64BIT);
-        let file_acl = self.with_inode(|inode| {
-            // file_acl 在 32 位字段
-            let mut acl = u32::from_le(inode.file_acl_lo) as u64;
-
-            // 检查是否有高 32 位（64 位模式）
-            if has_64bit {
-                acl |= (u16::from_le(inode.file_acl_high) as u64) << 32;
-            }
-
-            acl
-        })?;
+        let file_acl = self.get_xattr_block_addr()?;
 
         if file_acl == 0 {
             return Ok(None);

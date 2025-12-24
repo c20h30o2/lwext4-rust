@@ -42,12 +42,22 @@ block/handle 可以提供对某块cache的引用， 保证一致性
 
 18. 目前存在的问题：
 - inode inoderef 职责边界不明确， inode偏向拷贝块缓存到vec buffer以及从vec buffer拷贝到块缓存， 而inoderef偏向持有块缓存引用， 一致性更好, inode作为拷贝应该专注于作为视图， 而inoderef则用于需要修改的地方， 保证一致性 
+- block_group 与 block_group_ref 职责边界不明确， 
 - journal模块已经大致实现，但没有很好地整合, 后续需要全面提供日志模块整合， 比如extent中的ExtentWriter
 - bitmap虽然只提供一些简单的函数， 但是有一些还没有被使用到 ，可以尝试进行优化
 - extent 继续完整实现extent的合并功能, 完善extent的节点分裂\生长， find_next_allocated_block只支持深度为0时查找, get_blocks,insert_extent_simpl函数支持连续数据块分配， 更好地发挥extent的优势， 修改extent全面支持大于0的深度， 考虑优化extent性能，如配合unwritten实现延迟分配
 - dir htree实现还不够完整 dir中有需要联动extent的地方， 比如为htree分配新块时需要修改extent, 目前这部分内容不够完整, 另外还有write.rs中的迷之TODO,  dir中实现的功能与vfs层有一些重叠， 需要优化, 比如path_lookup.rs
-- xattr的实现较为久远， 普遍没有使用inoderef、block handle等保障一致性的工具
-- 由于遗漏了meta bg的情况， 需要全面检查所有可能涉及磁盘布局的代码， 它们可能默认采用某种磁盘布局， 忽略了一些特性带来的布局变化， 比如sb和gdt的特殊布局 比如一些地方对于块组描述符的定位存在巨大问题， 直接默认所需的块组描述符按传统格式排列在sb之后， 比如write_inode函数， 以及bgref中的get函数， 
+- ✅ xattr的实现已重构完成，使用inoderef、block handle等保障一致性的工具。inode内部xattr完全实现（读写删除），xattr block的读取完全实现。xattr block的写入部分实现（COW逻辑、块分配逻辑还需在更高层实现）。所有xattr测试通过（24个测试） TODO：完善并整合校验， 尝试利用上hash模块提供xattr块共享
+- ❌ META_BG 磁盘布局问题（已完成分析，见 META_BG_LAYOUT_ISSUES_REPORT.md）
+  发现的严重问题：
+  1. ❌ inode/write.rs:39 - write_inode 硬编码 GDT 位置（P0 严重）
+  2. ❌ fs/block_group_ref.rs:80 - BlockGroupRef::get 硬编码 GDT 位置（P0 极严重，影响所有块分配）
+  3. ❌ block_group/write.rs:37 - write_block_group_desc 硬编码 GDT 位置（P1 严重）
+  4. ⚠️ superblock/write.rs:38 - 只写主 superblock，缺少备份写入（P2 中等）
+  正确实现的代码：
+  ✅ block_group/read.rs::read_block_group_desc - 完整 META_BG 支持
+  ✅ superblock/read.rs - 完整 SPARSE_SUPER 支持
+  修复建议：见报告第 4 节详细方案 
 - c_api模块在初始时考虑作为兼容性的一环， 开发过程中没有完善， 现在考虑直接删除
 - utils模块也没有发挥作用， 考虑删除
 - 不少模块的crc32还没有真正整合, 比如extent模块, 有些地方则在验证校验和后直接忽略报错， 继续程序, 如try_alloc_in_group函数 

@@ -504,24 +504,12 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
 
         let inode_num = lookup_path(&mut self.bdev, &mut self.sb, path)?;
 
-        // 读取所有需要的数据，然后释放 inode_ref
-        let (inode, inode_data, xattr_block_data) = {
-            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
-            let inode_data = inode_ref.get_inode_data()?;
-            let xattr_block_data = inode_ref.read_xattr_block()?;
-            let inode = inode_ref.get_inode()?;
-            (inode, inode_data, xattr_block_data)
-        }; // inode_ref 在这里被 drop
+        // 获取 InodeRef 并直接使用新的 xattr API
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
 
-        // 调用底层 xattr API
+        // 调用新的 xattr API（使用 InodeRef）
         let mut buffer = alloc::vec![0u8; 4096]; // 4KB 缓冲区
-        let len = xattr::list(
-            &self.sb,
-            &inode,
-            &inode_data,
-            xattr_block_data.as_deref(),
-            &mut buffer,
-        )?;
+        let len = xattr::list(&mut inode_ref, &mut buffer)?;
 
         // 解析结果（以 \0 分隔的字符串列表）
         let mut result = Vec::new();
@@ -562,25 +550,12 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
 
         let inode_num = lookup_path(&mut self.bdev, &mut self.sb, path)?;
 
-        // 读取所有需要的数据，然后释放 inode_ref
-        let (inode, inode_data, xattr_block_data) = {
-            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
-            let inode_data = inode_ref.get_inode_data()?;
-            let xattr_block_data = inode_ref.read_xattr_block()?;
-            let inode = inode_ref.get_inode()?;
-            (inode, inode_data, xattr_block_data)
-        }; // inode_ref 在这里被 drop
+        // 获取 InodeRef 并直接使用新的 xattr API
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
 
-        // 调用底层 xattr API
+        // 调用新的 xattr API（使用 InodeRef）
         let mut buffer = alloc::vec![0u8; 65536]; // 64KB 缓冲区（xattr 值最大 64KB）
-        let len = xattr::get(
-            &self.sb,
-            &inode,
-            &inode_data,
-            xattr_block_data.as_deref(),
-            name,
-            &mut buffer,
-        )?;
+        let len = xattr::get(&mut inode_ref, name, &mut buffer)?;
 
         buffer.truncate(len);
         Ok(buffer)
@@ -600,112 +575,17 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     /// fs.setxattr("/etc/passwd", "user.comment", b"System password file")?;
     /// ```
     pub fn setxattr(&mut self, path: &str, name: &str, value: &[u8]) -> Result<()> {
-        use crate::{xattr, balloc::BlockAllocator};
+        use crate::xattr;
 
         let inode_num = lookup_path(&mut self.bdev, &mut self.sb, path)?;
-        let block_size = self.sb.block_size();
 
-        // 第一次尝试：使用现有的 xattr 空间
+        // 获取 InodeRef 并使用新的 xattr API
         let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
 
-        let mut inode_data = inode_ref.get_inode_data_mut()?;
-        let mut xattr_block_data = inode_ref.read_xattr_block_mut()?;
-        let inode = inode_ref.get_inode()?;
+        // 调用新的 xattr API（使用 InodeRef）
+        xattr::set(&mut inode_ref, name, value)?;
 
-        let sb_ptr = inode_ref.superblock_mut() as *mut crate::superblock::Superblock;
-        let sb_ref = unsafe { &*sb_ptr };
-
-        let result = xattr::set(
-            sb_ref,
-            &inode,
-            &mut inode_data,
-            xattr_block_data.as_deref_mut(),
-            name,
-            value,
-        );
-
-        match result {
-            Ok(_) => {
-                // 成功，写回 inode 数据
-                inode_ref.write_inode_data(&inode_data)?;
-
-                // 如果有 xattr block，也写回
-                if let Some(ref block_data) = xattr_block_data {
-                    let file_acl_lo = inode_ref.with_inode(|inode| u32::from_le(inode.file_acl_lo))?;
-                    if file_acl_lo != 0 {
-                        drop(inode_ref);
-                        self.bdev.write_block(file_acl_lo as u64, block_data)?;
-                    }
-                }
-
-                Ok(())
-            }
-            Err(e) if e.kind() == ErrorKind::NoSpace && xattr_block_data.is_none() => {
-                // 需要分配新的 xattr block
-                drop(inode_ref);
-
-                // 分配新块
-                let mut allocator = BlockAllocator::new();
-                let new_block_addr = allocator.alloc_block(&mut self.bdev, &mut self.sb, 0)?;
-
-                if new_block_addr == 0 {
-                    return Err(Error::new(ErrorKind::NoSpace, "Failed to allocate xattr block"));
-                }
-
-                // 初始化新的 xattr block
-                let mut new_block_data = alloc::vec![0u8; block_size as usize];
-
-                // 设置 xattr block header
-                use crate::consts::EXT4_XATTR_MAGIC;
-                let magic_bytes = EXT4_XATTR_MAGIC.to_le_bytes();
-                new_block_data[0..4].copy_from_slice(&magic_bytes);
-
-                // 设置引用计数为 1
-                let refcount = 1u32.to_le_bytes();
-                new_block_data[4..8].copy_from_slice(&refcount);
-
-                // 设置块数为 1（单块 xattr）
-                let blocks = 1u32.to_le_bytes();
-                new_block_data[8..12].copy_from_slice(&blocks);
-
-                // 重新获取 inode_ref 并更新 file_acl
-                let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
-
-                inode_ref.with_inode_mut(|inode| {
-                    inode.file_acl_lo = (new_block_addr as u32).to_le();
-                    // file_acl_high 通常为 0（32 位块地址足够）
-                })?;
-
-                inode_ref.mark_dirty()?;
-
-                // 重新获取数据
-                let mut inode_data = inode_ref.get_inode_data_mut()?;
-                let inode = inode_ref.get_inode()?;
-
-                let sb_ptr = inode_ref.superblock_mut() as *mut crate::superblock::Superblock;
-                let sb_ref = unsafe { &*sb_ptr };
-
-                // 再次尝试设置 xattr（现在有 xattr block 了）
-                xattr::set(
-                    sb_ref,
-                    &inode,
-                    &mut inode_data,
-                    Some(&mut new_block_data),
-                    name,
-                    value,
-                )?;
-
-                // 写回 inode 数据
-                inode_ref.write_inode_data(&inode_data)?;
-
-                // 写回 xattr block
-                drop(inode_ref);
-                self.bdev.write_block(new_block_addr, &new_block_data)?;
-
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
+        Ok(())
     }
 
     /// 删除扩展属性
@@ -725,39 +605,11 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
 
         let inode_num = lookup_path(&mut self.bdev, &mut self.sb, path)?;
 
-        // 获取 inode_ref 并修改 xattr
+        // 获取 InodeRef 并使用新的 xattr API
         let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
 
-        // 获取 inode 和数据（可变）
-        let mut inode_data = inode_ref.get_inode_data_mut()?;
-        let mut xattr_block_data = inode_ref.read_xattr_block_mut()?;
-        let inode = inode_ref.get_inode()?;
-
-        // 使用 unsafe 来获取不可变 superblock 引用
-        let sb_ptr = inode_ref.superblock_mut() as *mut crate::superblock::Superblock;
-        let sb_ref = unsafe { &*sb_ptr };
-
-        // 调用底层 xattr API
-        xattr::remove(
-            sb_ref,
-            &inode,
-            &mut inode_data,
-            xattr_block_data.as_deref_mut(),
-            name,
-        )?;
-
-        // 写回修改的 inode 块数据
-        inode_ref.write_inode_data(&inode_data)?;
-
-        // 写回 xattr block（如果存在）
-        if let Some(ref block_data) = xattr_block_data {
-            let file_acl_lo = inode_ref.with_inode(|inode| u32::from_le(inode.file_acl_lo))?;
-            if file_acl_lo != 0 {
-                drop(inode_ref);
-                self.bdev.write_block(file_acl_lo as u64, block_data)?;
-                return Ok(());
-            }
-        }
+        // 调用新的 xattr API（使用 InodeRef）
+        xattr::remove(&mut inode_ref, name)?;
 
         Ok(())
     }
