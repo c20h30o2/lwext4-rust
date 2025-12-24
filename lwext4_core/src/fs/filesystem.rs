@@ -823,16 +823,10 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     ///
     /// 由于借用检查器限制，目前仅支持查找已分配的块，不支持自动分配
     pub(crate) fn get_file_block(&mut self, inode_num: u32, logical_block: u32) -> Result<u64> {
-        use crate::extent::ExtentTree;
+        // ✅ 使用 InodeRef 的辅助方法，保证数据一致性
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
 
-        let inode = {
-            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
-            inode_ref.get_inode()?
-            // inode_ref dropped here
-        };
-
-        let mut extent_tree = ExtentTree::new(&mut self.bdev, self.sb.block_size());
-        let physical_block = extent_tree.map_block(&inode, logical_block)?
+        let physical_block = inode_ref.map_extent_block(logical_block)?
             .ok_or_else(|| Error::new(ErrorKind::Unsupported, "Block not allocated - automatic allocation requires API redesign"))?;
 
         Ok(physical_block)
@@ -1603,19 +1597,16 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     /// println!("Read {} bytes", n);
     /// ```
     pub fn read_at_inode(&mut self, inode_num: u32, buf: &mut [u8], offset: u64) -> Result<usize> {
-        let inode = {
-            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
-            inode_ref.get_inode()?
-        };
+        // ✅ 使用 InodeRef 的辅助方法，保证数据一致性
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
 
-        let file_size = inode.file_size();
+        // 检查 EOF
+        let file_size = inode_ref.size()?;
         if offset >= file_size {
             return Ok(0); // EOF
         }
 
-        let block_size = self.sb.block_size();
-        let mut extent_tree = crate::extent::ExtentTree::new(&mut self.bdev, block_size);
-        extent_tree.read_file(&inode, offset, buf)
+        inode_ref.read_extent_file(offset, buf)
     }
 
     /// 向指定 inode 的指定偏移量写入数据

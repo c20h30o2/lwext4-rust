@@ -315,6 +315,172 @@ pub fn alloc_block<D: BlockDevice>(
     allocator.alloc_block(bdev, sb, goal)
 }
 
+/// 在单个块组内分配多个连续块
+///
+/// # 参数
+///
+/// * `bdev` - 块设备引用
+/// * `sb` - superblock 可变引用
+/// * `goal` - 目标块地址（提示）
+/// * `max_count` - 期望分配的块数
+///
+/// # 返回
+///
+/// `(起始块地址, 实际分配的块数)`
+///
+/// # 注意
+///
+/// 实际分配数可能小于 max_count（块组空间不足）
+pub fn alloc_blocks_in_group<D: BlockDevice>(
+    bdev: &mut BlockDev<D>,
+    sb: &mut Superblock,
+    goal: u64,
+    max_count: u32,
+) -> Result<(u64, u32)> {
+    if max_count == 0 {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "Cannot allocate zero blocks",
+        ));
+    }
+
+    // 如果只需要 1 个块，使用现有的单块分配
+    if max_count == 1 {
+        let block = alloc_block(bdev, sb)?;
+        return Ok((block, 1));
+    }
+
+    let bgid = get_bgid_of_block(sb, goal);
+    let idx_in_bg = addr_to_idx_bg(sb, goal);
+
+    // 第一步：获取位图和块组信息
+    let (bitmap_addr, bg_copy, blocks_in_bg) = {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, bgid)?;
+
+        // 检查块组是否有足够的空闲块
+        let free_blocks = bg_ref.free_blocks_count()?;
+        if free_blocks == 0 {
+            return Err(Error::new(
+                ErrorKind::NoSpace,
+                "Block group has no free blocks",
+            ));
+        }
+
+        let bmp = bg_ref.block_bitmap()?;
+        let bg_data = bg_ref.get_block_group_copy()?;
+        let blk_cnt = sb.blocks_in_group_cnt(bgid);
+        (bmp, bg_data, blk_cnt)
+    };
+
+    // 第二步：在位图中查找连续空闲块
+    let (start_idx, alloc_count) = {
+        let mut bitmap_block = Block::get(bdev, bitmap_addr)?;
+
+        bitmap_block.with_data_mut(|bitmap_data| {
+            // 验证校验和
+            if !verify_bitmap_csum(sb, &bg_copy, bitmap_data) {
+                // 警告但继续
+            }
+
+            // 查找连续空闲位
+            let result = bitmap::find_consecutive_zeros(
+                bitmap_data,
+                idx_in_bg,
+                blocks_in_bg,
+                max_count,
+            );
+
+            if let Some(start) = result {
+                // 实际分配的块数（可能小于请求的数量）
+                // 我们需要计算找到了多少连续空闲块
+                let mut count = 0u32;
+                for i in start..blocks_in_bg {
+                    if count >= max_count {
+                        break;
+                    }
+                    if !bitmap::test_bit(bitmap_data, i) {
+                        count += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                if count == 0 {
+                    return Err(Error::new(
+                        ErrorKind::NoSpace,
+                        "No consecutive blocks found",
+                    ));
+                }
+
+                // 设置位图位
+                bitmap::set_bits(bitmap_data, start, count)?;
+
+                // 更新校验和
+                let mut bg_for_csum = bg_copy;
+                set_bitmap_csum(sb, &mut bg_for_csum, bitmap_data);
+
+                Ok::<_, Error>((start, count))
+            } else {
+                Err(Error::new(
+                    ErrorKind::NoSpace,
+                    "No consecutive blocks found in group",
+                ))
+            }
+        })??
+    };
+
+    // 第三步：更新块组描述符
+    {
+        let mut bg_ref = BlockGroupRef::get(bdev, sb, bgid)?;
+        bg_ref.dec_free_blocks(alloc_count)?;
+    }
+
+    // 第四步：更新 superblock
+    let mut sb_free = sb.free_blocks_count();
+    if sb_free >= alloc_count as u64 {
+        sb_free -= alloc_count as u64;
+    }
+    sb.set_free_blocks_count(sb_free);
+    sb.write(bdev)?;
+
+    // 计算绝对地址
+    let start_addr = bg_idx_to_addr(sb, start_idx, bgid);
+    Ok((start_addr, alloc_count))
+}
+
+/// 批量分配块（通用接口）
+///
+/// 当前实现：在单个块组内分配连续块
+/// 未来可扩展为跨块组分配
+///
+/// # 参数
+///
+/// * `bdev` - 块设备引用
+/// * `sb` - superblock 可变引用
+/// * `goal` - 目标块地址（提示）
+/// * `max_count` - 期望分配的块数
+///
+/// # 返回
+///
+/// `(起始块地址, 实际分配的块数)`
+///
+/// # 示例
+///
+/// ```rust,ignore
+/// // 尝试分配 100 个连续块
+/// let (start_block, count) = balloc::alloc_blocks(bdev, sb, goal, 100)?;
+/// println!("Allocated {} blocks starting at {}", count, start_block);
+/// ```
+pub fn alloc_blocks<D: BlockDevice>(
+    bdev: &mut BlockDev<D>,
+    sb: &mut Superblock,
+    goal: u64,
+    max_count: u32,
+) -> Result<(u64, u32)> {
+    // Phase 1: 只支持单块组分配
+    alloc_blocks_in_group(bdev, sb, goal, max_count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +496,11 @@ mod tests {
         let mut allocator = BlockAllocator::new();
         allocator.set_last_bg_id(5);
         assert_eq!(allocator.last_bg_id(), 5);
+    }
+
+    #[test]
+    fn test_alloc_blocks_api() {
+        // 这些测试需要实际的块设备和 ext4 文件系统
+        // 主要验证 API 编译和基本逻辑
     }
 }

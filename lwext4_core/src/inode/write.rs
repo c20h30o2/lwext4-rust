@@ -4,6 +4,7 @@
 
 use crate::{
     block::{BlockDev, BlockDevice},
+    block_group::get_block_group_desc_location,
     consts::*,
     error::Result,
     superblock::Superblock,
@@ -32,12 +33,10 @@ pub fn write_inode<D: BlockDevice>(
     let block_group = (inode_num - 1) / inodes_per_group;
     let index_in_group = (inode_num - 1) % inodes_per_group;
 
-    // 读取块组描述符（需要重用 read 模块的逻辑）
+    // 使用统一的 GDT 定位函数读取块组描述符，支持 META_BG
     let block_size = sb.block_size() as u64;
-    let desc_size = sb.group_desc_size() as u64;
-    let first_data_block = sb.first_data_block() as u64;
-    let gdt_block = first_data_block + 1;
-    let desc_offset = gdt_block * block_size + (block_group as u64) * desc_size;
+    let (gdt_block, desc_offset_in_block) = get_block_group_desc_location(sb, block_group);
+    let desc_offset = gdt_block * block_size + desc_offset_in_block;
 
     let mut desc_buf = vec![0u8; core::mem::size_of::<ext4_group_desc>()];
     bdev.read_bytes(desc_offset, &mut desc_buf)?;

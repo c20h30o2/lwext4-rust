@@ -9,30 +9,34 @@ use crate::{
 };
 use alloc::vec;
 
-/// 读取块组描述符
+/// 计算块组描述符的存储位置
+///
+/// 这个函数是所有读写块组描述符操作的基础，确保统一的 META_BG 支持
 ///
 /// # 参数
 ///
-/// * `bdev` - 块设备引用
 /// * `sb` - superblock 引用
 /// * `group_num` - 块组编号
 ///
 /// # 返回
 ///
-/// 成功返回块组描述符
+/// (块地址, 块内偏移) 元组
 ///
 /// # 实现说明
-///
-/// 对应 lwext4 的 `ext4_fs_get_block_group_ref()`
 ///
 /// 支持两种模式：
 /// - 传统模式：所有块组描述符连续存储在 first_data_block + 1 位置
 /// - META_BG 模式：块组描述符分散存储在各个 meta groups 中
-pub fn read_block_group_desc<D: BlockDevice>(
-    bdev: &mut BlockDev<D>,
+///
+/// 此函数被以下模块使用：
+/// - `block_group/read.rs`: 读取块组描述符
+/// - `block_group/write.rs`: 写入块组描述符
+/// - `fs/block_group_ref.rs`: BlockGroupRef::get()
+/// - `inode/write.rs`: write_inode()
+pub fn get_block_group_desc_location(
     sb: &Superblock,
     group_num: u32,
-) -> Result<ext4_group_desc> {
+) -> (u64, u64) {
     let block_size = sb.block_size() as u64;
     let desc_size = sb.group_desc_size() as u64;
     let first_data_block = sb.first_data_block() as u64;
@@ -91,6 +95,38 @@ pub fn read_block_group_desc<D: BlockDevice>(
         gdt_block = first_data_block + 1 + ((group_num as u64) * desc_size) / block_size;
         desc_offset_in_block = ((group_num as u64) * desc_size) % block_size;
     }
+
+    (gdt_block, desc_offset_in_block)
+}
+
+/// 读取块组描述符
+///
+/// # 参数
+///
+/// * `bdev` - 块设备引用
+/// * `sb` - superblock 引用
+/// * `group_num` - 块组编号
+///
+/// # 返回
+///
+/// 成功返回块组描述符
+///
+/// # 实现说明
+///
+/// 对应 lwext4 的 `ext4_fs_get_block_group_ref()`
+///
+/// 支持两种模式：
+/// - 传统模式：所有块组描述符连续存储在 first_data_block + 1 位置
+/// - META_BG 模式：块组描述符分散存储在各个 meta groups 中
+pub fn read_block_group_desc<D: BlockDevice>(
+    bdev: &mut BlockDev<D>,
+    sb: &Superblock,
+    group_num: u32,
+) -> Result<ext4_group_desc> {
+    let block_size = sb.block_size() as u64;
+
+    // 使用统一的 GDT 定位函数
+    let (gdt_block, desc_offset_in_block) = get_block_group_desc_location(sb, group_num);
 
     // 计算最终的字节偏移
     let desc_offset = gdt_block * block_size + desc_offset_in_block;

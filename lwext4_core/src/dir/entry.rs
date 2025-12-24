@@ -102,7 +102,7 @@ impl<'a, D: BlockDevice> DirIterator<'a, D> {
 
         // 读取下一个块
         self.extent_tree
-            .read_block(self.inode, self.current_block, &mut self.block_data)?;
+            .read_block(self.inode.inner(), self.current_block, &mut self.block_data)?;
 
         self.current_block += 1;
         self.offset_in_block = 0;

@@ -796,13 +796,15 @@ impl<'a, D: BlockDevice> ExtentWriter<'a, D> {
         }
     }
 
-    /// 插入新的 extent
+    /// 插入新的 extent（支持自动分裂）
     ///
     /// 对应 lwext4 的 `ext4_ext_insert_extent`
     ///
     /// # 参数
     ///
     /// * `inode_ref` - Inode 引用
+    /// * `sb` - Superblock 引用
+    /// * `allocator` - 块分配器
     /// * `logical_block` - 逻辑块起始位置
     /// * `physical_block` - 物理块起始位置
     /// * `length` - extent 长度（块数）
@@ -811,18 +813,25 @@ impl<'a, D: BlockDevice> ExtentWriter<'a, D> {
     ///
     /// 成功返回 Ok(())
     ///
-    /// # 注意
+    /// # 功能
     ///
     /// 此函数会：
     /// 1. 查找插入位置
-    /// 2. 检查是否可以与现有 extent 合并
-    /// 3. 如果节点满，进行分裂（当前未实现，返回错误）
+    /// 2. 如果节点满，自动进行分裂或增加树深度
+    /// 3. 检查是否可以与现有 extent 合并（TODO）
     /// 4. 插入新 extent
     ///
-    /// ⚠️ **当前限制**：不支持节点分裂，如果节点满会返回 NoSpace 错误
+    /// # 注意
+    ///
+    /// ⚠️ **当前限制**：
+    /// - 仅支持根节点和第一层叶子节点
+    /// - 不支持深度 > 1 的树
+    /// - 不支持 extent 合并优化
     pub fn insert_extent(
         &mut self,
         inode_ref: &mut InodeRef<D>,
+        sb: &mut crate::superblock::Superblock,
+        allocator: &mut crate::balloc::BlockAllocator,
         logical_block: u32,
         physical_block: u64,
         length: u32,
@@ -841,17 +850,38 @@ impl<'a, D: BlockDevice> ExtentWriter<'a, D> {
 
         if entries_count >= max_entries {
             // 节点满了，需要分裂
-            // TODO: 实现节点分裂
-            return Err(Error::new(
-                ErrorKind::NoSpace,
-                "Extent node is full, split not yet implemented",
-            ));
+            if leaf.node_type == ExtentNodeType::Root {
+                // 根节点满了，需要增加树深度
+                self.grow_tree_depth(inode_ref, sb, allocator)?;
+
+                // 重新查找路径（树结构已改变）
+                path = self.find_extent_path(inode_ref, logical_block)?;
+            } else {
+                // 叶子节点满了，分裂它
+                let leaf_at = path.nodes.len() - 1;
+                self.split_extent_node(
+                    inode_ref,
+                    sb,
+                    allocator,
+                    &mut path,
+                    leaf_at,
+                    logical_block,
+                )?;
+
+                // 重新查找路径（树结构已改变）
+                path = self.find_extent_path(inode_ref, logical_block)?;
+            }
         }
 
         // 3. 尝试与现有 extent 合并（简化版本）
         // TODO: 实现完整的合并逻辑
 
-        // 4. 在 inode 或块中插入新 extent
+        // 4. 重新获取叶子节点（可能已改变）
+        let leaf = path.leaf().ok_or_else(|| {
+            Error::new(ErrorKind::Corrupted, "Extent path has no leaf node after split")
+        })?;
+
+        // 5. 在 inode 或块中插入新 extent
         if leaf.node_type == ExtentNodeType::Root {
             // 插入到 inode 的 extent 根节点
             self.insert_extent_to_inode(inode_ref, logical_block, physical_block, length)?;
@@ -1053,39 +1083,50 @@ impl<'a, D: BlockDevice> ExtentWriter<'a, D> {
     // 节点分裂操作（占位实现）
     // ========================================================================
 
-    /// 分裂 extent 节点（占位实现）
-    ///
-    /// ⚠️ **尚未实现** - 总是返回 `Unsupported` 错误
+    /// 分裂 extent 节点
     ///
     /// 对应 lwext4 的 `ext4_ext_split()`
     ///
-    /// # 未来实现需求
-    ///
-    /// 完整的节点分裂需要：
-    /// 1. 分配新的 extent 块（需要块分配器）
-    /// 2. 将当前节点的一半 extent 移动到新节点
+    /// 当节点满时，将其分裂成两个节点：
+    /// 1. 分配新的 extent 块
+    /// 2. 将当前节点的一半条目移动到新节点
     /// 3. 在父节点中插入新的索引条目
-    /// 4. 如果父节点也满了，递归分裂父节点
-    /// 5. 可能需要增加树的深度（创建新的根节点）
-    /// 6. 更新所有相关节点的 header
     ///
     /// # 参数
     ///
+    /// * `inode_ref` - Inode 引用
+    /// * `sb` - Superblock 引用
+    /// * `allocator` - 块分配器
     /// * `path` - Extent 路径（包含需要分裂的节点）
-    /// * `logical_block` - 导致分裂的逻辑块号
+    /// * `at` - 需要分裂的节点在路径中的索引
+    /// * `logical_block` - 触发分裂的逻辑块号
     ///
     /// # 返回
     ///
-    /// `Err(Unsupported)` - 功能未实现
+    /// 成功返回 `Ok(())`
+    ///
+    /// # 注意
+    ///
+    /// ⚠️ **当前限制**：
+    /// - 不支持递归分裂（当父节点也满时）
+    /// - 不支持根节点分裂（需要先调用 grow_tree_depth）
     pub fn split_extent_node(
         &mut self,
-        _path: &mut ExtentPath,
-        _logical_block: u32,
+        inode_ref: &mut InodeRef<D>,
+        sb: &mut crate::superblock::Superblock,
+        allocator: &mut crate::balloc::BlockAllocator,
+        path: &mut ExtentPath,
+        at: usize,
+        logical_block: u32,
     ) -> Result<()> {
-        Err(Error::new(
-            ErrorKind::Unsupported,
-            "Extent node splitting not yet implemented - requires block allocation",
-        ))
+        crate::extent::split_extent_node(
+            inode_ref,
+            sb,
+            allocator,
+            path,
+            at,
+            logical_block,
+        )
     }
 
     /// 合并相邻的 extent（占位实现）
@@ -1121,37 +1162,47 @@ impl<'a, D: BlockDevice> ExtentWriter<'a, D> {
         ))
     }
 
-    /// 增加 extent 树的深度（占位实现）
-    ///
-    /// ⚠️ **尚未实现** - 总是返回 `Unsupported` 错误
+    /// 增加 extent 树的深度
     ///
     /// 对应 lwext4 的 `ext4_ext_grow_indepth()`
     ///
-    /// # 未来实现需求
-    ///
-    /// 增加树深度需要：
-    /// 1. 分配新的 extent 块作为新的根节点
+    /// 当根节点需要分裂时，增加树的深度：
+    /// 1. 分配新的 extent 块
     /// 2. 将当前根节点的内容复制到新分配的块
-    /// 3. 在 inode 中创建新的根节点，指向刚才分配的块
-    /// 4. 更新所有节点的深度值
+    /// 3. 在 inode 中创建新的索引根节点，指向新分配的块
+    /// 4. 树深度加 1
     ///
     /// # 参数
     ///
     /// * `inode_ref` - Inode 引用
-    /// * `logical_block` - 触发增长的逻辑块号
+    /// * `sb` - Superblock 引用
+    /// * `allocator` - 块分配器
     ///
     /// # 返回
     ///
-    /// `Err(Unsupported)` - 功能未实现
-    pub fn grow_tree_depth<D2: BlockDevice>(
+    /// 成功返回新分配的块地址
+    ///
+    /// # 示例
+    ///
+    /// ```text
+    /// Before (depth=0):
+    /// Root (in inode)
+    ///   [E1, E2, E3, E4]
+    ///
+    /// After (depth=1):
+    /// Root (in inode)
+    ///   [Index -> Block 1000]
+    ///           ↓
+    ///      Block 1000
+    ///        [E1, E2, E3, E4]
+    /// ```
+    pub fn grow_tree_depth(
         &mut self,
-        _inode_ref: &mut InodeRef<D2>,
-        _logical_block: u32,
-    ) -> Result<()> {
-        Err(Error::new(
-            ErrorKind::Unsupported,
-            "Growing extent tree depth not yet implemented - requires block allocation",
-        ))
+        inode_ref: &mut InodeRef<D>,
+        sb: &mut crate::superblock::Superblock,
+        allocator: &mut crate::balloc::BlockAllocator,
+    ) -> Result<u64> {
+        crate::extent::grow_tree_depth(inode_ref, sb, allocator)
     }
 }
 

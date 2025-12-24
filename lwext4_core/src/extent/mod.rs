@@ -53,12 +53,20 @@
 //! - ⚠️ 大文件支持（多层树需要使用 ExtentWriter）
 
 mod checksum;
+mod grow;
+mod helpers;
+// mod insert; // TODO: Needs redesign to work with Vec<ExtentPathNode>
+mod split;
 mod tree;
 mod unwritten;
 mod verify;
 mod write;
 
 pub use checksum::*;
+pub use grow::grow_tree_depth;
+pub use helpers::*;
+// pub use insert::insert_index; // TODO: Needs redesign
+pub use split::split_extent_node;
 pub use tree::*;
 pub use unwritten::*;
 pub use verify::*;

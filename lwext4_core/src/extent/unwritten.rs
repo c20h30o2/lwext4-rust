@@ -159,8 +159,8 @@ pub fn split_extent_at<D: BlockDevice>(
     split: u32,
     split_flag: u32,
 ) -> Result<()> {
-    // 读取原始 extent
-    let (ee_block, ee_len, ee_start) = inode_ref.with_inode(|inode| {
+    // 读取原始 extent（包括 unwritten 状态，用于回滚）
+    let (ee_block, ee_len, ee_start, original_was_unwritten) = inode_ref.with_inode(|inode| {
         let header_ptr = inode.blocks.as_ptr() as *const crate::types::ext4_extent_header;
         let header = unsafe { &*header_ptr };
         let entries = u16::from_le(header.entries) as usize;
@@ -180,8 +180,9 @@ pub fn split_extent_at<D: BlockDevice>(
         let ee_block = u32::from_le(extent.block);
         let ee_len = get_actual_len(extent);
         let ee_start = get_pblock(extent);
+        let was_unwritten = is_unwritten(extent);
 
-        Ok((ee_block, ee_len, ee_start))
+        Ok((ee_block, ee_len, ee_start, was_unwritten))
     })??;
 
     // 计算新块的物理起始位置
@@ -243,16 +244,25 @@ pub fn split_extent_at<D: BlockDevice>(
     }
 
     // 第三步：插入新 extent
-    // 注意：如果插入失败，需要恢复原 extent 的长度
+    // 注意：如果插入失败，需要完整恢复原 extent 状态
     if let Err(e) = insert_extent_simple(inode_ref, &new_extent) {
-        // 恢复原 extent 长度
+        // ✅ 完整回滚：恢复长度 + unwritten 状态
         inode_ref.with_inode_mut(|inode| {
             let header_ptr = inode.blocks.as_mut_ptr() as *mut crate::types::ext4_extent_header;
             let extent_ptr = unsafe {
                 (header_ptr.add(1) as *mut ext4_extent).add(extent_idx)
             };
             let extent = unsafe { &mut *extent_ptr };
+
+            // 恢复原始长度
             extent.len = ee_len.to_le();
+
+            // 恢复原始 unwritten 状态
+            if original_was_unwritten {
+                mark_unwritten(extent);
+            } else {
+                mark_initialized(extent);
+            }
         });
 
         return Err(e);

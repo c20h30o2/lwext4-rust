@@ -537,11 +537,14 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
 
         if !create {
             // 只读模式：使用 ExtentTree 查找
+            // 注意：这里使用快照是安全的，因为：
+            // 1. self (InodeRef) 持有对 inode 块的独占访问
+            // 2. 获取快照后立即使用，中间无其他操作
+            // 3. InodeRef 不会被释放
             let inode_copy = self.get_inode_copy()?;
-            let temp_inode = crate::inode::Inode::from_raw(inode_copy, self.inode_num);
             let mut extent_tree = ExtentTree::new(self.bdev, self.sb.block_size());
 
-            match extent_tree.map_block(&temp_inode, logical_block)? {
+            match extent_tree.map_block_internal(&inode_copy, logical_block)? {
                 Some(physical_block) => Ok(physical_block),
                 None => Err(Error::new(
                     ErrorKind::NotFound,
@@ -740,6 +743,67 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
     /// 建议的物理块组 ID
     pub fn get_alloc_goal(&self) -> u32 {
         self.inode_num / self.sb.inodes_per_group()
+    }
+
+    /// 读取文件内容（使用 extent，保证数据一致性）
+    ///
+    /// # 参数
+    ///
+    /// * `offset` - 文件内偏移（字节）
+    /// * `buf` - 输出缓冲区
+    ///
+    /// # 返回
+    ///
+    /// 实际读取的字节数
+    ///
+    /// # 数据一致性
+    ///
+    /// 此方法在 `with_inode` 闭包内使用 extent tree，保证读取最新数据
+    pub fn read_extent_file(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
+        use crate::extent::ExtentTree;
+
+        // 安全性说明：
+        // - 使用 unsafe 指针绕过借用检查器，允许 ExtentTree 和 with_inode 同时访问 self
+        // - ExtentTree 只读取块设备数据，不修改 self 的状态
+        // - with_inode 闭包只读取 inode 数据
+        // - 两者不会产生冲突
+        let bdev_ptr = self.bdev as *mut _;
+        let block_size = self.sb.block_size();
+
+        let bdev_ref = unsafe { &mut *bdev_ptr };
+        let mut extent_tree = ExtentTree::new(bdev_ref, block_size);
+
+        self.with_inode(|inode| {
+            extent_tree.read_file_internal(inode, offset, buf)
+        })?
+    }
+
+    /// 映射逻辑块号到物理块号（使用 extent，保证数据一致性）
+    ///
+    /// # 参数
+    ///
+    /// * `logical_block` - 逻辑块号
+    ///
+    /// # 返回
+    ///
+    /// 物理块号（如果存在）
+    ///
+    /// # 数据一致性
+    ///
+    /// 此方法在 `with_inode` 闭包内使用 extent tree，保证读取最新数据
+    pub fn map_extent_block(&mut self, logical_block: u32) -> Result<Option<u64>> {
+        use crate::extent::ExtentTree;
+
+        // 安全性说明：同 read_extent_file
+        let bdev_ptr = self.bdev as *mut _;
+        let block_size = self.sb.block_size();
+
+        let bdev_ref = unsafe { &mut *bdev_ptr };
+        let mut extent_tree = ExtentTree::new(bdev_ref, block_size);
+
+        self.with_inode(|inode| {
+            extent_tree.map_block_internal(inode, logical_block)
+        })?
     }
 }
 

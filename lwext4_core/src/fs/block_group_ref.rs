@@ -4,6 +4,7 @@
 
 use crate::{
     block::{Block, BlockDev, BlockDevice},
+    block_group::get_block_group_desc_location,
     consts::*,
     error::Result,
     superblock::Superblock,
@@ -71,20 +72,9 @@ impl<'a, D: BlockDevice> BlockGroupRef<'a, D> {
         sb: &'a Superblock,
         bgid: u32,
     ) -> Result<Self> {
-        // 计算块组描述符表的位置
-        let block_size = sb.block_size() as u64;
-        let desc_size = sb.group_desc_size() as u64;
-
-        // 块组描述符表在第一个数据块之后
-        let first_data_block = sb.first_data_block() as u64;
-        let gdt_first_block = first_data_block + 1;
-
-        // 计算此块组描述符所在的块和偏移
-        let desc_offset_in_gdt = (bgid as u64) * desc_size;
-        let block_index = desc_offset_in_gdt / block_size;
-        let offset_in_block = (desc_offset_in_gdt % block_size) as usize;
-
-        let desc_block_addr = gdt_first_block + block_index;
+        // 使用统一的 GDT 定位函数，支持 META_BG
+        let (desc_block_addr, offset_in_block_u64) = get_block_group_desc_location(sb, bgid);
+        let offset_in_block = offset_in_block_u64 as usize;
 
         // 获取包含块组描述符的 block 句柄
         let block = Block::get(bdev, desc_block_addr)?;

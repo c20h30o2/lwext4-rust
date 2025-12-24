@@ -69,25 +69,16 @@ impl<D: BlockDevice> File<D> {
     /// println!("Read {} bytes", n);
     /// ```
     pub fn read(&mut self, fs: &mut Ext4FileSystem<D>, buf: &mut [u8]) -> Result<usize> {
-        // 临时获取 inode 数据以获取文件大小
-        let file_size = {
-            let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
-            inode_ref.size()?
-        };
+        // ✅ 使用 InodeRef 的辅助方法，保证数据一致性
+        let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
 
+        // 检查 EOF
+        let file_size = inode_ref.size()?;
         if self.offset >= file_size {
             return Ok(0); // EOF
         }
 
-        // 临时获取 inode 数据用于读取
-        let inode = {
-            let mut inode_ref = fs.get_inode_ref(self.inode_num)?;
-            inode_ref.get_inode()?
-        };
-
-        let mut extent_tree = ExtentTree::new(&mut fs.bdev, self.block_size);
-        let n = extent_tree.read_file(&inode, self.offset, buf)?;
-
+        let n = inode_ref.read_extent_file(self.offset, buf)?;
         self.offset += n as u64;
 
         Ok(n)

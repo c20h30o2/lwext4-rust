@@ -35,6 +35,9 @@ pub const EXT4_SUPERBLOCK_SIZE: usize = 1024;
 /// ext4 魔数 (0xEF53)
 pub const EXT4_SUPERBLOCK_MAGIC: u16 = 0xEF53;
 
+/// Extent 树魔数 (0xF30A)
+pub const EXT4_EXTENT_MAGIC: u16 = 0xF30A;
+
 /// Root inode 编号
 pub const EXT4_ROOT_INODE: u32 = 2;
 

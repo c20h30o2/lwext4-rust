@@ -4,9 +4,9 @@ use crate::{
     block::{Block, BlockDev, BlockDevice},
     error::{Error, ErrorKind, Result},
     inode::Inode,
-    types::{ext4_extent, ext4_extent_header, ext4_extent_idx},
+    types::{ext4_extent, ext4_extent_header, ext4_extent_idx, ext4_inode},
 };
-use alloc::vec::Vec;
+use alloc::vec;
 
 /// Extent 树遍历器
 ///
@@ -22,19 +22,30 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
         Self { bdev, block_size }
     }
 
-    /// 将逻辑块号映射到物理块号
+
+    /// 将逻辑块号映射到物理块号（内部实现，在 with_inode 闭包内使用）
     ///
     /// # 参数
     ///
-    /// * `inode` - inode 引用
+    /// * `inode` - ext4_inode 引用（通常从 InodeRef::with_inode 闭包获得）
     /// * `logical_block` - 逻辑块号
     ///
     /// # 返回
     ///
     /// 成功返回物理块号，如果找不到对应的 extent 返回 None
-    pub fn map_block(&mut self, inode: &Inode, logical_block: u32) -> Result<Option<u64>> {
-        // 检查 inode 是否使用 extent
-        if !inode.has_extents() {
+    ///
+    /// # 使用场景
+    ///
+    /// 此方法设计为在 `InodeRef::with_inode` 闭包内使用，保证数据一致性：
+    /// ```rust,ignore
+    /// inode_ref.with_inode(|inode| {
+    ///     extent_tree.map_block_internal(inode, logical_block)
+    /// })?
+    /// ```
+    pub(crate) fn map_block_internal(&mut self, inode: &ext4_inode, logical_block: u32) -> Result<Option<u64>> {
+        // 检查 inode 是否使用 extent（检查 flags）
+        let flags = u32::from_le(inode.flags);
+        if flags & 0x80000 == 0 {  // EXT4_EXTENTS_FL
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "Inode does not use extents",
@@ -43,10 +54,9 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
 
         // extent 树根节点位于 inode 的 blocks 数组中
         // blocks[0..14] 包含 extent 树的根节点数据（60 字节）
-        let inode_inner = inode.inner();
         let root_data = unsafe {
             core::slice::from_raw_parts(
-                inode_inner.blocks.as_ptr() as *const u8,
+                inode.blocks.as_ptr() as *const u8,
                 60, // 15 * 4 = 60 bytes
             )
         };
@@ -198,16 +208,36 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
         }
     }
 
-    /// 读取文件的某个逻辑块
+    /// 将逻辑块号映射到物理块号
     ///
     /// # 参数
     ///
     /// * `inode` - inode 引用
     /// * `logical_block` - 逻辑块号
+    ///
+    /// # 返回
+    ///
+    /// 成功返回物理块号，如果找不到对应的 extent 返回 None
+    ///
+    /// # 数据一致性说明
+    ///
+    /// 此方法接受 `Inode` 包装类型，内部会访问其 `ext4_inode` 数据。
+    /// 在单线程场景下安全使用。在需要保证数据一致性的场景，
+    /// 应在 `InodeRef::with_inode` 闭包内使用 `map_block_internal`。
+    pub fn map_block(&mut self, inode: &Inode, logical_block: u32) -> Result<Option<u64>> {
+        self.map_block_internal(inode.inner(), logical_block)
+    }
+
+    /// 读取文件的某个逻辑块
+    ///
+    /// # 参数
+    ///
+    /// * `inode` - ext4_inode 引用
+    /// * `logical_block` - 逻辑块号
     /// * `buf` - 输出缓冲区（大小应该等于块大小）
-    pub fn read_block(
+    pub(crate) fn read_block(
         &mut self,
-        inode: &Inode,
+        inode: &ext4_inode,
         logical_block: u32,
         buf: &mut [u8],
     ) -> Result<()> {
@@ -218,7 +248,7 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
             ));
         }
 
-        match self.map_block(inode, logical_block)? {
+        match self.map_block_internal(inode, logical_block)? {
             Some(physical_block) => {
                 let mut block = Block::get(self.bdev, physical_block)?;
                 block.with_data(|data| {
@@ -233,24 +263,34 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
         }
     }
 
-    /// 读取文件内容
+
+    /// 读取文件内容（内部实现，在 with_inode 闭包内使用）
     ///
     /// # 参数
     ///
-    /// * `inode` - inode 引用
+    /// * `inode` - ext4_inode 引用（通常从 InodeRef::with_inode 闭包获得）
     /// * `offset` - 文件内偏移（字节）
     /// * `buf` - 输出缓冲区
     ///
     /// # 返回
     ///
     /// 实际读取的字节数
-    pub fn read_file(
+    ///
+    /// # 使用场景
+    ///
+    /// 此方法设计为在 `InodeRef::with_inode` 闭包内使用，保证数据一致性。
+    pub(crate) fn read_file_internal(
         &mut self,
-        inode: &Inode,
+        inode: &ext4_inode,
         offset: u64,
         buf: &mut [u8],
     ) -> Result<usize> {
-        let file_size = inode.file_size();
+        // 计算文件大小
+        let file_size = {
+            let size_lo = u32::from_le(inode.size_lo) as u64;
+            let size_hi = u32::from_le(inode.size_hi) as u64;
+            size_lo | (size_hi << 32)
+        };
 
         // 检查偏移是否超出文件大小
         if offset >= file_size {
@@ -287,6 +327,31 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
         }
 
         Ok(bytes_read)
+    }
+
+    /// 读取文件内容
+    ///
+    /// # 参数
+    ///
+    /// * `inode` - inode 引用
+    /// * `offset` - 文件内偏移（字节）
+    /// * `buf` - 输出缓冲区
+    ///
+    /// # 返回
+    ///
+    /// 实际读取的字节数
+    ///
+    /// # 数据一致性说明
+    ///
+    /// 此方法接受 `Inode` 包装类型。在需要保证数据一致性的场景，
+    /// 应在 `InodeRef::with_inode` 闭包内使用 `read_file_internal`。
+    pub fn read_file(
+        &mut self,
+        inode: &Inode,
+        offset: u64,
+        buf: &mut [u8],
+    ) -> Result<usize> {
+        self.read_file_internal(inode.inner(), offset, buf)
     }
 }
 

@@ -9,7 +9,7 @@ use crate::{
 };
 use alloc::vec;
 
-use super::read::BlockGroup;
+use super::{BlockGroup, get_block_group_desc_location};
 
 /// 写入块组描述符到块设备
 ///
@@ -30,14 +30,12 @@ pub fn write_block_group_desc<D: BlockDevice>(
     desc: &ext4_group_desc,
 ) -> Result<()> {
     let block_size = sb.block_size() as u64;
-    let desc_size = sb.group_desc_size() as u64;
 
-    // 块组描述符表在第一个数据块之后
-    let first_data_block = sb.first_data_block() as u64;
-    let gdt_block = first_data_block + 1;
+    // 使用统一的 GDT 定位函数，支持 META_BG
+    let (gdt_block, desc_offset_in_block) = get_block_group_desc_location(sb, group_num);
 
     // 计算描述符的偏移
-    let desc_offset = gdt_block * block_size + (group_num as u64) * desc_size;
+    let desc_offset = gdt_block * block_size + desc_offset_in_block;
 
     // 将描述符转换为字节数组
     let desc_bytes = unsafe {

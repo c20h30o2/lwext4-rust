@@ -8,7 +8,7 @@ use crate::{
 };
 use alloc::vec;
 
-/// 将 superblock 写回块设备
+/// 将 superblock 写回块设备（仅主 superblock）
 ///
 /// 对应 lwext4 的 `ext4_sb_write()`
 ///
@@ -22,6 +22,11 @@ use alloc::vec;
 /// # 返回
 ///
 /// 成功返回 ()
+///
+/// # 注意
+///
+/// 这个函数只写主 superblock，不写备份。
+/// 如果需要写入备份 superblock，请使用 `write_superblock_with_backups()`
 pub fn write_superblock<D: BlockDevice>(bdev: &mut BlockDev<D>, sb: &mut ext4_sblock) -> Result<()> {
     // 在写入前设置校验和
     super::checksum::set_checksum(sb);
@@ -40,6 +45,74 @@ pub fn write_superblock<D: BlockDevice>(bdev: &mut BlockDev<D>, sb: &mut ext4_sb
     Ok(())
 }
 
+/// 将 superblock 写回块设备（包括所有备份）
+///
+/// 根据 SPARSE_SUPER 特性写入备份 superblock 到正确的块组
+///
+/// # 参数
+///
+/// * `bdev` - 块设备引用
+/// * `sb` - superblock 结构
+///
+/// # 返回
+///
+/// 成功返回 ()
+///
+/// # 实现说明
+///
+/// 根据 ext4 规范：
+/// - 主 superblock 总是在偏移 1024 字节处
+/// - 备份 superblock 在每个包含超级块的块组的起始位置
+/// - 块组是否包含超级块由 SPARSE_SUPER 特性决定
+///   - 未启用 SPARSE_SUPER：每个块组都有备份
+///   - 启用 SPARSE_SUPER：仅块组 0, 1, 以及 3/5/7 的幂次
+///
+/// 这确保了文件系统的鲁棒性，即使主 superblock 损坏也能恢复
+pub fn write_superblock_with_backups<D: BlockDevice>(bdev: &mut BlockDev<D>, sb: &mut ext4_sblock) -> Result<()> {
+    // 在写入前设置校验和
+    super::checksum::set_checksum(sb);
+
+    // 序列化 superblock 到字节数组
+    let sb_bytes = unsafe {
+        core::slice::from_raw_parts(
+            sb as *const ext4_sblock as *const u8,
+            core::mem::size_of::<ext4_sblock>(),
+        )
+    };
+
+    // 1. 写入主 superblock（偏移 1024 字节）
+    bdev.write_bytes(EXT4_SUPERBLOCK_OFFSET, sb_bytes)?;
+
+    // 2. 写入备份 superblock
+    // 创建临时 Superblock 包装器以使用 has_super_in_bg() 方法
+    let sb_wrapper = super::Superblock::new(*sb);
+    let block_size = sb_wrapper.block_size() as u64;
+    let block_group_count = sb_wrapper.block_group_count();
+
+    // 遍历所有块组，写入包含 superblock 的块组
+    for bgid in 0..block_group_count {
+        // 块组 0 已经通过主 superblock 写入，跳过
+        if bgid == 0 {
+            continue;
+        }
+
+        // 检查此块组是否应该包含 superblock 备份
+        if sb_wrapper.has_super_in_bg(bgid) {
+            // 计算此块组的起始块号
+            let bg_start_block = sb_wrapper.first_data_block() as u64
+                + (bgid as u64) * sb_wrapper.blocks_per_group() as u64;
+
+            // superblock 在块组起始位置
+            let sb_offset = bg_start_block * block_size;
+
+            // 写入备份 superblock
+            bdev.write_bytes(sb_offset, sb_bytes)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Superblock 更新操作
 impl super::Superblock {
     /// 获取可变的内部 superblock 结构
@@ -49,15 +122,41 @@ impl super::Superblock {
         &mut self.inner
     }
 
-    /// 将 superblock 写回块设备
+    /// 将 superblock 写回块设备（仅主 superblock）
     ///
     /// 在写入前会自动更新校验和（如果启用）
     ///
     /// # 参数
     ///
     /// * `bdev` - 块设备引用
+    ///
+    /// # 注意
+    ///
+    /// 这个方法只写主 superblock，不写备份。
+    /// 如果需要写入备份 superblock，请使用 `write_with_backups()`
     pub fn write<D: BlockDevice>(&mut self, bdev: &mut BlockDev<D>) -> Result<()> {
         write_superblock(bdev, &mut self.inner)
+    }
+
+    /// 将 superblock 写回块设备（包括所有备份）
+    ///
+    /// 在写入前会自动更新校验和（如果启用）
+    ///
+    /// 根据 SPARSE_SUPER 特性写入备份 superblock 到正确的块组
+    ///
+    /// # 参数
+    ///
+    /// * `bdev` - 块设备引用
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 ()
+    ///
+    /// # 实现说明
+    ///
+    /// 这确保了文件系统的鲁棒性，即使主 superblock 损坏也能从备份恢复
+    pub fn write_with_backups<D: BlockDevice>(&mut self, bdev: &mut BlockDev<D>) -> Result<()> {
+        write_superblock_with_backups(bdev, &mut self.inner)
     }
 
     /// 更新空闲块数
