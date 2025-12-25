@@ -195,14 +195,14 @@ pub fn compute_block_checksum(sb: &Superblock, block_num: u64, block_data: &[u8]
     let block_num_le = block_num.to_le_bytes();
 
     // 1. 首先对 UUID 计算 CRC32C
-    let mut crc = crc32c::crc32c_append(EXT4_CRC32_INIT, sb.uuid());
+    let mut crc = crate::crc::crc32c_append(EXT4_CRC32_INIT, sb.uuid());
 
     // 2. 对块号计算 CRC32C
-    crc = crc32c::crc32c_append(crc, &block_num_le);
+    crc = crate::crc::crc32c_append(crc, &block_num_le);
 
     // 3. 对整个块数据计算 CRC32C（注意：计算时 h_checksum 字段应为 0）
     // 假设调用者已经将 h_checksum 置为 0
-    crc = crc32c::crc32c_append(crc, block_data);
+    crc = crate::crc::crc32c_append(crc, block_data);
 
     crc
 }

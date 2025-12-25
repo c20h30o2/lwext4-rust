@@ -350,7 +350,7 @@ pub fn convert_to_initialized<D: BlockDevice>(
     // Case 3: 转换范围在中间 [unwritten][initialized][unwritten]
     // 需要两次分裂
 
-    // 第一次分裂：split + blocks 处，将后半部分标记为 unwritten
+    // 第一次分裂：split + blocks 处，将后半部分标spport记为 unwritten
     split_extent_at(
         inode_ref,
         sb,

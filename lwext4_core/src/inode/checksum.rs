@@ -6,10 +6,8 @@ use crate::{
     consts::{EXT4_FEATURE_RO_COMPAT_METADATA_CSUM, EXT4_GOOD_OLD_INODE_SIZE},
     superblock::Superblock,
     types::ext4_inode,
+    crc::EXT4_CRC32_INIT,
 };
-
-/// CRC32C 初始值
-const EXT4_CRC32_INIT: u32 = !0u32; // 0xFFFFFFFF
 
 /// 获取 inode 校验和
 ///
@@ -76,19 +74,19 @@ pub fn compute_checksum(sb: &Superblock, inode_num: u32, inode: &ext4_inode) -> 
 
     // 初始化 CRC，包含 inode 编号
     let inode_num_bytes = inode_num.to_le_bytes();
-    let mut crc = crc32c::crc32c_append(EXT4_CRC32_INIT, &inode_num_bytes);
+    let mut crc = crate::crc::crc32c_append(EXT4_CRC32_INIT, &inode_num_bytes);
 
     // 计算 checksum_lo 字段的偏移量
     let checksum_lo_offset = offset_of_checksum_lo();
 
     // 计算到 checksum_lo 之前的数据
     if checksum_lo_offset > 0 {
-        crc = crc32c::crc32c_append(crc, &inode_bytes[..checksum_lo_offset]);
+        crc = crate::crc::crc32c_append(crc, &inode_bytes[..checksum_lo_offset]);
     }
 
     // checksum_lo 字段应该被视为0（2字节）
     let zero_bytes = [0u8; 2];
-    crc = crc32c::crc32c_append(crc, &zero_bytes);
+    crc = crate::crc::crc32c_append(crc, &zero_bytes);
 
     let after_checksum_lo = checksum_lo_offset + 2;
 
@@ -98,21 +96,21 @@ pub fn compute_checksum(sb: &Superblock, inode_num: u32, inode: &ext4_inode) -> 
 
         // 计算 checksum_lo 之后到 checksum_hi 之前的数据
         if checksum_hi_offset > after_checksum_lo {
-            crc = crc32c::crc32c_append(crc, &inode_bytes[after_checksum_lo..checksum_hi_offset]);
+            crc = crate::crc::crc32c_append(crc, &inode_bytes[after_checksum_lo..checksum_hi_offset]);
         }
 
         // checksum_hi 字段应该被视为0（2字节）
-        crc = crc32c::crc32c_append(crc, &zero_bytes);
+        crc = crate::crc::crc32c_append(crc, &zero_bytes);
 
         // 计算 checksum_hi 之后的数据
         let after_checksum_hi = checksum_hi_offset + 2;
         if inode_size > after_checksum_hi {
-            crc = crc32c::crc32c_append(crc, &inode_bytes[after_checksum_hi..inode_size]);
+            crc = crate::crc::crc32c_append(crc, &inode_bytes[after_checksum_hi..inode_size]);
         }
     } else {
         // 对于标准 inode，计算 checksum_lo 之后的所有数据
         if inode_size > after_checksum_lo {
-            crc = crc32c::crc32c_append(crc, &inode_bytes[after_checksum_lo..inode_size]);
+            crc = crate::crc::crc32c_append(crc, &inode_bytes[after_checksum_lo..inode_size]);
         }
     }
 

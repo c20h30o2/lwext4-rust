@@ -16,10 +16,8 @@ use crate::{
     superblock::Superblock,
     types::{ext4_extent_header, ext4_extent_tail},
     BlockDevice,
+    crc::EXT4_CRC32_INIT,
 };
-
-/// CRC32C 初始值
-const EXT4_CRC32_INIT: u32 = !0u32; // 0xFFFFFFFF
 
 /// 计算 extent tail 的偏移量
 ///
@@ -111,15 +109,15 @@ pub fn compute_checksum(
     }
 
     // 1. 计算 fs uuid 的 CRC
-    let mut crc = crc32c::crc32c_append(EXT4_CRC32_INIT, &sb.inner().uuid);
+    let mut crc = crate::crc::crc32c_append(EXT4_CRC32_INIT, &sb.inner().uuid);
 
     // 2. 计算 inode number 的 CRC
     let inode_num_bytes = inode_num.to_le_bytes();
-    crc = crc32c::crc32c_append(crc, &inode_num_bytes);
+    crc = crate::crc::crc32c_append(crc, &inode_num_bytes);
 
     // 3. 计算 inode generation 的 CRC
     let inode_gen_bytes = inode_gen.to_le_bytes();
-    crc = crc32c::crc32c_append(crc, &inode_gen_bytes);
+    crc = crate::crc::crc32c_append(crc, &inode_gen_bytes);
 
     // 4. 计算 extent 块的 CRC（到 tail 之前）
     let header_ptr = block_data.as_ptr() as *const ext4_extent_header;
@@ -127,7 +125,7 @@ pub fn compute_checksum(
     let tail_offset = extent_tail_offset(header);
 
     if tail_offset <= block_data.len() {
-        crc = crc32c::crc32c_append(crc, &block_data[..tail_offset]);
+        crc = crate::crc::crc32c_append(crc, &block_data[..tail_offset]);
     }
 
     crc

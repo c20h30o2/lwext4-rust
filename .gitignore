@@ -5,3 +5,4 @@
 /lwext4_core/target
 /.claude
 /docs
+/test-images/rootfs-riscv64.img 

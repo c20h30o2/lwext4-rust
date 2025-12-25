@@ -153,18 +153,18 @@ pub fn calculate_csum<D: BlockDevice>(sb: &Superblock, inode_ref: &InodeRef<D>, 
     const EXT4_CRC32_INIT: u32 = 0xFFFFFFFF;
 
     // 1. 先计算 UUID 的校验和
-    let mut csum = crc32c::crc32c_append(EXT4_CRC32_INIT, sb.uuid());
+    let mut csum = crate::crc::crc32c_append(EXT4_CRC32_INIT, sb.uuid());
 
     // 2. 然后计算 inode 号的校验和
     let ino_index = inode_ref.index().to_le_bytes();
-    csum = crc32c::crc32c_append(csum, &ino_index);
+    csum = crate::crc::crc32c_append(csum, &ino_index);
 
     // 3. 然后计算 inode generation 的校验和
     let ino_gen = inode_ref.generation().to_le_bytes();
-    csum = crc32c::crc32c_append(csum, &ino_gen);
+    csum = crate::crc::crc32c_append(csum, &ino_gen);
 
     // 4. 最后计算目录项数据的校验和（不包含尾部）
-    csum = crc32c::crc32c_append(csum, dirent);
+    csum = crate::crc::crc32c_append(csum, dirent);
 
     csum
 }

@@ -1854,6 +1854,8 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
 
         // 初始化 inode
         {
+            use crate::extent::tree_init;
+
             let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, new_inode)?;
 
             // 设置文件类型和权限
@@ -1875,7 +1877,17 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
                 inode.ctime = now.to_le();
             })?;
 
+            // 设置 EXTENTS 标志（启用 extent 格式）
+            inode_ref.with_inode_mut(|inode| {
+                let flags = u32::from_le(inode.flags);
+                inode.flags = (flags | EXT4_INODE_FLAG_EXTENTS).to_le();
+            })?;
+
             inode_ref.set_size(0)?;
+
+            // 初始化 extent 树
+            tree_init(&mut inode_ref)?;
+
             inode_ref.mark_dirty()?;
 
             // 如果是目录，初始化目录结构
@@ -1983,6 +1995,201 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
         self.remove_dir_entry(parent_inode, name)?;
 
         Ok(target_inode)
+    }
+
+    /// 基于 inode 的重命名操作 (VFS 风格)
+    ///
+    /// 在两个目录之间移动/重命名条目，使用 inode 编号而非路径
+    ///
+    /// # 参数
+    ///
+    /// * `src_dir_ino` - 源目录的 inode 编号
+    /// * `src_name` - 源条目名称
+    /// * `dst_dir_ino` - 目标目录的 inode 编号
+    /// * `dst_name` - 目标条目名称
+    ///
+    /// # 行为
+    ///
+    /// - 从源目录移除 `src_name` 条目
+    /// - 在目标目录添加 `dst_name` 条目，指向同一 inode
+    /// - 如果移动目录且跨父目录：
+    ///   - 更新源父目录和目标父目录的链接计数
+    ///   - 更新被移动目录的 ".." 条目
+    ///
+    /// # 错误
+    ///
+    /// - `ErrorKind::NotFound` - 源条目不存在
+    /// - `ErrorKind::InvalidInput` - inode 不是目录
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 在同一目录内重命名
+    /// fs.rename_inode(dir_ino, "old.txt", dir_ino, "new.txt")?;
+    ///
+    /// // 移动到不同目录
+    /// fs.rename_inode(src_dir_ino, "file.txt", dst_dir_ino, "file.txt")?;
+    /// ```
+    pub fn rename_inode(
+        &mut self,
+        src_dir_ino: u32,
+        src_name: &str,
+        dst_dir_ino: u32,
+        dst_name: &str,
+    ) -> Result<()> {
+        use crate::dir::write::{EXT4_DE_DIR, EXT4_DE_REG_FILE};
+
+        // 1. 查找目标 inode
+        let target_inode = self.lookup_in_dir(src_dir_ino, src_name)?;
+
+        // 2. 获取目标的文件类型
+        let (is_dir, file_type) = {
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, target_inode)?;
+            let is_dir = inode_ref.is_dir()?;
+            let file_type = if is_dir {
+                EXT4_DE_DIR
+            } else {
+                EXT4_DE_REG_FILE
+            };
+            (is_dir, file_type)
+        };
+
+        // 3. 如果目标名字已存在，先删除（POSIX 语义）
+        //    注意：忽略 NotFound 错误，因为目标可能不存在
+        let _ = self.remove_dir_entry(dst_dir_ino, dst_name);
+
+        // 4. 在目标目录添加条目
+        self.add_dir_entry(dst_dir_ino, dst_name, target_inode, file_type)?;
+
+        // 5. 如果是目录且移动到新父目录，增加新父目录的链接计数
+        if is_dir && src_dir_ino != dst_dir_ino {
+            let mut dst_parent_inode_ref =
+                InodeRef::get(&mut self.bdev, &mut self.sb, dst_dir_ino)?;
+
+            dst_parent_inode_ref.with_inode_mut(|inode| {
+                let links = u16::from_le(inode.links_count);
+                inode.links_count = (links + 1).to_le();
+            })?;
+            dst_parent_inode_ref.mark_dirty()?;
+        }
+
+        // 6. 从源目录删除条目
+        self.remove_dir_entry(src_dir_ino, src_name)?;
+
+        // 7. 如果是目录且移动到新父目录，减少旧父目录的链接计数
+        if is_dir && src_dir_ino != dst_dir_ino {
+            let mut src_parent_inode_ref =
+                InodeRef::get(&mut self.bdev, &mut self.sb, src_dir_ino)?;
+
+            src_parent_inode_ref.with_inode_mut(|inode| {
+                let links = u16::from_le(inode.links_count);
+                inode.links_count = (links.saturating_sub(1)).to_le();
+            })?;
+            src_parent_inode_ref.mark_dirty()?;
+        }
+
+        // 8. 如果是目录且移动到新父目录，更新 ".." 条目
+        if is_dir && src_dir_ino != dst_dir_ino {
+            // 删除旧的 ".." 条目
+            self.remove_dir_entry(target_inode, "..")?;
+
+            // 添加新的 ".." 条目
+            self.add_dir_entry(target_inode, "..", dst_dir_ino, EXT4_DE_DIR)?;
+        }
+
+        Ok(())
+    }
+
+    /// 创建硬链接 (VFS 风格)
+    ///
+    /// 在指定目录中创建指向已存在 inode 的新目录条目
+    ///
+    /// # 参数
+    ///
+    /// * `dir_ino` - 目录的 inode 编号
+    /// * `name` - 新链接的名称
+    /// * `child_ino` - 目标 inode 编号
+    ///
+    /// # 行为
+    ///
+    /// - 在目录中添加新条目
+    /// - 增加目标 inode 的链接计数
+    /// - 不允许对目录创建硬链接（ext4 限制）
+    ///
+    /// # 错误
+    ///
+    /// - `ErrorKind::InvalidInput` - dir_ino 不是目录或 child_ino 是目录
+    /// - `ErrorKind::AlreadyExists` - 名称已存在
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// // 为文件创建硬链接
+    /// fs.link_inode(dir_ino, "link_name.txt", file_ino)?;
+    /// ```
+    pub fn link_inode(
+        &mut self,
+        dir_ino: u32,
+        name: &str,
+        child_ino: u32,
+    ) -> Result<()> {
+        use crate::dir::write::EXT4_DE_REG_FILE;
+
+        // 1. 验证 dir_ino 是目录
+        {
+            let mut dir_inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, dir_ino)?;
+            if !dir_inode_ref.is_dir()? {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "dir_ino is not a directory",
+                ));
+            }
+        }
+
+        // 2. 验证 child_ino 不是目录（ext4 不支持目录硬链接）
+        let file_type = {
+            let mut child_inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, child_ino)?;
+            let is_dir = child_inode_ref.is_dir()?;
+
+            if is_dir {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Cannot create hard link to directory",
+                ));
+            }
+
+            // 获取文件类型
+            child_inode_ref.with_inode(|inode| {
+                let mode = u16::from_le(inode.mode);
+                let type_bits = mode & crate::consts::EXT4_INODE_MODE_TYPE_MASK;
+
+                // 根据 mode 确定目录条目类型
+                match type_bits {
+                    crate::consts::EXT4_INODE_MODE_FILE => crate::dir::write::EXT4_DE_REG_FILE,
+                    crate::consts::EXT4_INODE_MODE_SOFTLINK => crate::dir::write::EXT4_DE_SYMLINK,
+                    crate::consts::EXT4_INODE_MODE_CHARDEV => crate::dir::write::EXT4_DE_CHRDEV,
+                    crate::consts::EXT4_INODE_MODE_BLOCKDEV => crate::dir::write::EXT4_DE_BLKDEV,
+                    crate::consts::EXT4_INODE_MODE_FIFO => crate::dir::write::EXT4_DE_FIFO,
+                    crate::consts::EXT4_INODE_MODE_SOCKET => crate::dir::write::EXT4_DE_SOCK,
+                    _ => EXT4_DE_REG_FILE, // 默认为普通文件
+                }
+            })?
+        };
+
+        // 3. 在目录中添加条目
+        self.add_dir_entry(dir_ino, name, child_ino, file_type)?;
+
+        // 4. 增加 child_ino 的链接计数
+        {
+            let mut child_inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, child_ino)?;
+            child_inode_ref.with_inode_mut(|inode| {
+                let links = u16::from_le(inode.links_count);
+                inode.links_count = (links + 1).to_le();
+            })?;
+            child_inode_ref.mark_dirty()?;
+        }
+
+        Ok(())
     }
 }
 

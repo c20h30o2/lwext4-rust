@@ -18,6 +18,7 @@
 //! **新代码应使用**：
 //! - `iterator::DirIterator` - 新的迭代器
 //! - `iterator::read_dir()` - 读取目录
+//! - `reader::DirReader` - ArceOS 兼容的目录读取器
 //! - `path_lookup::PathLookup` - 路径查找
 //! - `path_lookup::lookup_path()` - 便捷函数
 //!
@@ -28,6 +29,7 @@
 // 新实现（推荐使用）
 pub mod checksum;
 pub mod iterator;
+pub mod reader;
 pub mod path_lookup;
 pub mod hash;
 pub mod htree;
@@ -41,6 +43,7 @@ mod lookup;
 
 // 重新导出常用类型（新实现）
 pub use iterator::{DirEntry, DirIterator, read_dir};
+pub use reader::DirReader;
 pub use path_lookup::{PathLookup, lookup_path, get_inode_ref_by_path};
 
 // 向后兼容：重新导出旧 API（使用类型别名避免冲突）

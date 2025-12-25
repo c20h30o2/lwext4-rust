@@ -7,9 +7,11 @@ mod file;
 mod metadata;
 mod inode_ref;
 mod block_group_ref;
+mod types;
 
 pub use filesystem::Ext4FileSystem;
 pub use file::File;
 pub use metadata::{FileMetadata, FileType};
 pub use inode_ref::InodeRef;
 pub use block_group_ref::BlockGroupRef;
+pub use types::{FileAttr, FsConfig, InodeType, StatFs, SystemHal};

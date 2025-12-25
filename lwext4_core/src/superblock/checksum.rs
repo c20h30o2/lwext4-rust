@@ -5,12 +5,8 @@
 use crate::{
     consts::{EXT4_FEATURE_RO_COMPAT_METADATA_CSUM, EXT4_CHECKSUM_CRC32C},
     types::ext4_sblock,
+    crc::EXT4_CRC32_INIT,
 };
-
-/// CRC32C 初始值
-///
-/// 对应 lwext4 的 `EXT4_CRC32_INIT`
-const EXT4_CRC32_INIT: u32 = !0u32; // 0xFFFFFFFF
 
 /// 计算 superblock 的 CRC32C 校验和
 ///
@@ -38,7 +34,7 @@ pub fn compute_checksum(sb: &ext4_sblock) -> u32 {
     let data_to_hash = &sb_bytes[..checksum_offset];
 
     // 使用 CRC32C 算法计算
-    crc32c::crc32c_append(EXT4_CRC32_INIT, data_to_hash)
+    crate::crc::crc32c_append(EXT4_CRC32_INIT, data_to_hash)
 }
 
 /// 验证 superblock 校验和

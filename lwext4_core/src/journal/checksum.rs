@@ -19,9 +19,9 @@ use crate::error::Result;
 ///
 /// CRC32C 校验和
 pub fn block_csum(uuid: &[u8; 16], data: &[u8], sequence: u32) -> u32 {
-    let mut crc = crc32c::crc32c(uuid);
-    crc = crc32c::crc32c_append(crc, &sequence.to_be_bytes());
-    crc = crc32c::crc32c_append(crc, data);
+    let mut crc = crate::crc::crc32c(uuid);
+    crc = crate::crc::crc32c_append(crc, &sequence.to_be_bytes());
+    crc = crate::crc::crc32c_append(crc, data);
     crc
 }
 
@@ -230,7 +230,7 @@ pub fn verify_superblock_csum(sb: &jbd_sb) -> bool {
         )
     };
 
-    let calculated_csum = crc32c::crc32c(data);
+    let calculated_csum = crate::crc::crc32c(data);
 
     stored_csum == calculated_csum
 }
@@ -252,7 +252,7 @@ pub fn calculate_superblock_csum(sb: &mut jbd_sb) {
         )
     };
 
-    let csum = crc32c::crc32c(data);
+    let csum = crate::crc::crc32c(data);
     sb.checksum = csum.to_be();
 }
 

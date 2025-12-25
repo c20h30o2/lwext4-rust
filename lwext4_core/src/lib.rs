@@ -101,6 +101,9 @@ pub mod journal;
 /// Extended Attributes (xattr)
 pub mod xattr;
 
+/// CRC32C 校验和计算
+pub(crate) mod crc;
+
 // ===== C API 兼容层（可选）=====
 
 /// C API 兼容层
@@ -130,10 +133,14 @@ pub use block_group::{BlockGroup, read_block_group_desc, write_block_group_desc}
 pub use extent::ExtentTree;
 
 // Dir
-pub use dir::{DirEntry, DirIterator, PathLookup, read_dir, lookup_path, get_inode_ref_by_path};
+pub use dir::{DirEntry, DirIterator, DirReader, PathLookup, read_dir, lookup_path, get_inode_ref_by_path};
 
 // FileSystem
-pub use fs::{Ext4FileSystem, File, FileMetadata, FileType};
+pub use fs::{
+    Ext4FileSystem, File, FileMetadata, FileType,
+    FileAttr, FsConfig, InodeType, StatFs, SystemHal,
+    InodeRef, BlockGroupRef,
+};
 
 // Cache
 pub use cache::{BlockCache, CacheBuffer, CacheFlags, CacheStats, BufferId, DEFAULT_CACHE_SIZE};

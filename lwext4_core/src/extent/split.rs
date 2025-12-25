@@ -464,7 +464,7 @@ fn insert_index_to_node<D: BlockDevice>(
 //=============================================================================
 
 /// 从 inode 读取 extent 数组
-fn read_extents_from_inode<D: BlockDevice>(
+pub(super) fn read_extents_from_inode<D: BlockDevice>(
     inode_ref: &mut InodeRef<D>,
 ) -> Result<(Vec<ext4_extent>, ext4_extent_header)> {
     inode_ref.with_inode(|inode| {
@@ -497,7 +497,7 @@ fn read_extents_from_inode<D: BlockDevice>(
 }
 
 /// 从块读取 extent 数组
-fn read_extents_from_block<D: BlockDevice>(
+pub(super) fn read_extents_from_block<D: BlockDevice>(
     bdev: &mut crate::block::BlockDev<D>,
     block_addr: u64,
     _block_size: u32,
@@ -602,7 +602,7 @@ fn read_indices_from_block<D: BlockDevice>(
 }
 
 /// 写入 extent 数组到 inode
-fn write_extents_to_inode<D: BlockDevice>(
+pub(super) fn write_extents_to_inode<D: BlockDevice>(
     inode_ref: &mut InodeRef<D>,
     header: &ext4_extent_header,
     extents: &[ext4_extent],
@@ -639,7 +639,7 @@ fn write_extents_to_inode<D: BlockDevice>(
 }
 
 /// 写入 extent 数组到块
-fn write_extents_to_block<D: BlockDevice>(
+pub(super) fn write_extents_to_block<D: BlockDevice>(
     bdev: &mut crate::block::BlockDev<D>,
     block_addr: u64,
     _block_size: u32,

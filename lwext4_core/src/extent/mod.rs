@@ -56,9 +56,12 @@ mod checksum;
 mod grow;
 mod helpers;
 // mod insert; // TODO: Needs redesign to work with Vec<ExtentPathNode>
+mod merge;
+mod remove;
 mod split;
 mod tree;
 mod unwritten;
+mod unwritten_multilevel;
 mod verify;
 mod write;
 
@@ -66,9 +69,15 @@ pub use checksum::*;
 pub use grow::grow_tree_depth;
 pub use helpers::*;
 // pub use insert::insert_index; // TODO: Needs redesign
+pub use merge::{try_merge_and_insert, MergeDirection};
+pub use remove::remove_space_multilevel;
 pub use split::split_extent_node;
 pub use tree::*;
 pub use unwritten::*;
+pub use unwritten_multilevel::{
+    convert_to_initialized_multilevel,
+    split_extent_at_multilevel,
+};
 pub use verify::*;
 pub use write::{
     get_blocks, remove_space, tree_init, ExtentPath, ExtentPathNode, ExtentNodeType,

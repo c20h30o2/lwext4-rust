@@ -29,11 +29,11 @@ pub fn bitmap_csum(sb: &Superblock, bitmap: &[u8]) -> u32 {
     let blocks_per_group = sb.blocks_per_group();
 
     // 先计算 UUID 的校验和
-    let mut csum = crc32c::crc32c_append(0xFFFFFFFF, sb.uuid());
+    let mut csum = crate::crc::crc32c_append(0xFFFFFFFF, sb.uuid());
 
     // 然后计算位图的校验和
     let bitmap_size = ((blocks_per_group + 7) / 8) as usize;
-    csum = crc32c::crc32c_append(csum, &bitmap[..bitmap_size]);
+    csum = crate::crc::crc32c_append(csum, &bitmap[..bitmap_size]);
 
     csum
 }

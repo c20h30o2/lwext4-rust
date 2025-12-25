@@ -1257,16 +1257,24 @@ pub fn remove_space<D: BlockDevice>(
         u16::from_le(header.depth)
     })?;
 
-    // 当前只支持深度 0
-    if depth != 0 {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            "remove_space only supports depth=0 extent trees",
-        ));
-    }
+    // 使用多层树支持的实现
+    // 注意：这需要一个 allocator，但当前签名没有
+    // 为了保持向后兼容，我们创建一个临时的 allocator
+    let mut allocator = balloc::BlockAllocator::new();
 
-    // 调用简化的删除函数
-    remove_space_simple(inode_ref, sb, from, to)?;
+    if depth == 0 {
+        // 深度 0 使用优化的简化版本
+        remove_space_simple(inode_ref, sb, from, to)?;
+    } else {
+        // 多层树使用完整实现
+        crate::extent::remove_space_multilevel(
+            inode_ref,
+            sb,
+            &mut allocator,
+            from,
+            to,
+        )?;
+    }
 
     Ok(())
 }

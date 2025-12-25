@@ -944,19 +944,19 @@ pub(super) fn update_dir_block_checksum(
         let tail_offset = block_size - core::mem::size_of::<ext4_dir_entry_tail>();
 
         // 1. 计算 UUID 的校验和
-        let mut csum = crc32c::crc32c_append(EXT4_CRC32_INIT, uuid);
+        let mut csum = crate::crc::crc32c_append(EXT4_CRC32_INIT, uuid);
 
         // 2. 计算 inode 号的校验和
         let ino_index = inode_index.to_le_bytes();
-        csum = crc32c::crc32c_append(csum, &ino_index);
+        csum = crate::crc::crc32c_append(csum, &ino_index);
 
         // 3. 计算 inode generation 的校验和
         let ino_gen = inode_generation.to_le_bytes();
-        csum = crc32c::crc32c_append(csum, &ino_gen);
+        csum = crate::crc::crc32c_append(csum, &ino_gen);
 
         // 4. 计算目录项数据的校验和（不包含尾部）
         let dirent_data = &data[..tail_offset];
-        csum = crc32c::crc32c_append(csum, dirent_data);
+        csum = crate::crc::crc32c_append(csum, dirent_data);
 
         // 5. 设置校验和到尾部
         if let Some(tail) = checksum::get_tail_mut(data, block_size) {
