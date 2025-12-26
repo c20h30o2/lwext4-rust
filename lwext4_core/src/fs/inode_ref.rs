@@ -528,50 +528,71 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
         use crate::{balloc::BlockAllocator, extent::get_blocks};
 
         // 检查是否使用 extents
-        if !self.has_extents()? {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "Non-extent block mapping not yet supported",
-            ));
-        }
+        let uses_extents = self.has_extents()?;
 
-        if !create {
-            // 只读模式：使用 ExtentTree 查找
-            // 注意：这里使用快照是安全的，因为：
-            // 1. self (InodeRef) 持有对 inode 块的独占访问
-            // 2. 获取快照后立即使用，中间无其他操作
-            // 3. InodeRef 不会被释放
-            let inode_copy = self.get_inode_copy()?;
-            let mut extent_tree = ExtentTree::new(self.bdev, self.sb.block_size());
+        if !uses_extents {
+            // 使用传统的 indirect blocks 映射
+            if create {
+                // Indirect blocks 的写入/分配暂不支持
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "Indirect block allocation not yet implemented",
+                ));
+            }
 
-            match extent_tree.map_block_internal(&inode_copy, logical_block)? {
+            // 使用 IndirectBlockMapper 进行只读映射
+            use crate::indirect::IndirectBlockMapper;
+
+            let mapper = IndirectBlockMapper::new(self.sb.block_size());
+            let inode_wrapper = self.get_inode()?;
+
+            match mapper.map_block(self.bdev, &inode_wrapper, logical_block as u64)? {
                 Some(physical_block) => Ok(physical_block),
                 None => Err(Error::new(
                     ErrorKind::NotFound,
-                    "Logical block not found in extent tree",
+                    "Logical block is a sparse hole in file",
                 )),
             }
         } else {
-            // 写入模式：使用 get_blocks 进行分配
-            // 安全性说明：
-            // - get_blocks 需要 &mut Superblock 但 self 已持有 &mut sb
-            // - 使用 unsafe 指针绕过借用检查器
-            // - get_blocks 会修改 superblock 的空闲块计数，但不会与 InodeRef 冲突
-            let sb_ptr = self.superblock_mut() as *mut Superblock;
-            let sb_ref = unsafe { &mut *sb_ptr };
+            // 使用 extent 树映射
+            if !create {
+                // 只读模式：使用 ExtentTree 查找
+                // 注意：这里使用快照是安全的，因为：
+                // 1. self (InodeRef) 持有对 inode 块的独占访问
+                // 2. 获取快照后立即使用，中间无其他操作
+                // 3. InodeRef 不会被释放
+                let inode_copy = self.get_inode_copy()?;
+                let mut extent_tree = ExtentTree::new(self.bdev, self.sb.block_size());
 
-            let mut allocator = BlockAllocator::new();
-
-            let (physical_block, _allocated_count) =
-                get_blocks(self, sb_ref, &mut allocator, logical_block, 1, true)?;
-
-            if physical_block == 0 {
-                Err(Error::new(
-                    ErrorKind::NoSpace,
-                    "Failed to allocate block",
-                ))
+                match extent_tree.map_block_internal(&inode_copy, logical_block)? {
+                    Some(physical_block) => Ok(physical_block),
+                    None => Err(Error::new(
+                        ErrorKind::NotFound,
+                        "Logical block not found in extent tree",
+                    )),
+                }
             } else {
-                Ok(physical_block)
+                // 写入模式：使用 get_blocks 进行分配
+                // 安全性说明：
+                // - get_blocks 需要 &mut Superblock 但 self 已持有 &mut sb
+                // - 使用 unsafe 指针绕过借用检查器
+                // - get_blocks 会修改 superblock 的空闲块计数，但不会与 InodeRef 冲突
+                let sb_ptr = self.superblock_mut() as *mut Superblock;
+                let sb_ref = unsafe { &mut *sb_ptr };
+
+                let mut allocator = BlockAllocator::new();
+
+                let (physical_block, _allocated_count) =
+                    get_blocks(self, sb_ref, &mut allocator, logical_block, 1, true)?;
+
+                if physical_block == 0 {
+                    Err(Error::new(
+                        ErrorKind::NoSpace,
+                        "Failed to allocate block",
+                    ))
+                } else {
+                    Ok(physical_block)
+                }
             }
         }
     }
@@ -745,7 +766,7 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
         self.inode_num / self.sb.inodes_per_group()
     }
 
-    /// 读取文件内容（使用 extent，保证数据一致性）
+    /// 读取文件内容（支持 extent 和 indirect blocks，保证数据一致性）
     ///
     /// # 参数
     ///
@@ -758,24 +779,104 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
     ///
     /// # 数据一致性
     ///
-    /// 此方法在 `with_inode` 闭包内使用 extent tree，保证读取最新数据
+    /// 此方法会根据 inode 的标志自动选择 extent 或 indirect blocks 映射
     pub fn read_extent_file(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
-        use crate::extent::ExtentTree;
+        // 检查文件类型 - 符号链接应该使用 readlink，不能当作文件读取
+        let is_symlink = self.with_inode(|inode| inode.is_symlink())?;
+        if is_symlink {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Cannot read symlink as regular file - use readlink instead",
+            ));
+        }
 
-        // 安全性说明：
-        // - 使用 unsafe 指针绕过借用检查器，允许 ExtentTree 和 with_inode 同时访问 self
-        // - ExtentTree 只读取块设备数据，不修改 self 的状态
-        // - with_inode 闭包只读取 inode 数据
-        // - 两者不会产生冲突
-        let bdev_ptr = self.bdev as *mut _;
-        let block_size = self.sb.block_size();
+        // 检查文件大小
+        let file_size = self.size()?;
+        if offset >= file_size {
+            return Ok(0); // EOF
+        }
 
-        let bdev_ref = unsafe { &mut *bdev_ptr };
-        let mut extent_tree = ExtentTree::new(bdev_ref, block_size);
+        // 计算实际可读取的字节数
+        let to_read = buf.len().min((file_size - offset) as usize);
+        if to_read == 0 {
+            return Ok(0);
+        }
 
-        self.with_inode(|inode| {
-            extent_tree.read_file_internal(inode, offset, buf)
-        })?
+        let block_size = self.sb.block_size() as u64;
+
+        // 检查是否使用 extents
+        let uses_extents = self.has_extents()?;
+
+        if uses_extents {
+            // 使用 extent 树读取
+            use crate::extent::ExtentTree;
+
+            let bdev_ptr = self.bdev as *mut _;
+            let bdev_ref = unsafe { &mut *bdev_ptr };
+            let mut extent_tree = ExtentTree::new(bdev_ref, block_size as u32);
+
+            self.with_inode(|inode| {
+                extent_tree.read_file_internal(inode, offset, &mut buf[..to_read])
+            })?
+        } else {
+            // 使用 indirect blocks 读取
+            #[cfg(feature = "std")]
+            eprintln!("[inode_ref] Reading with indirect blocks: offset={}, to_read={}", offset, to_read);
+
+            let mut bytes_read = 0;
+            let mut current_offset = offset;
+
+            while bytes_read < to_read {
+                let logical_block = (current_offset / block_size) as u32;
+                let offset_in_block = (current_offset % block_size) as usize;
+                let remaining = to_read - bytes_read;
+                let to_read_in_block = remaining.min(block_size as usize - offset_in_block);
+
+                #[cfg(feature = "std")]
+                eprintln!("[inode_ref] Logical block={}, offset_in_block={}, to_read_in_block={}",
+                         logical_block, offset_in_block, to_read_in_block);
+
+                // 使用 get_inode_dblk_idx 获取物理块号（已支持 indirect blocks）
+                match self.get_inode_dblk_idx(logical_block, false) {
+                    Ok(physical_block) => {
+                        #[cfg(feature = "std")]
+                        eprintln!("[inode_ref] Physical block={}", physical_block);
+
+                        // 读取块数据
+                        let mut block_buf = alloc::vec![0u8; block_size as usize];
+                        let result = self.bdev.read_blocks_direct(physical_block, 1, &mut block_buf);
+
+                        #[cfg(feature = "std")]
+                        eprintln!("[inode_ref] Read result: {:?}", result);
+
+                        result?;
+
+                        // 复制到输出缓冲区
+                        buf[bytes_read..bytes_read + to_read_in_block]
+                            .copy_from_slice(&block_buf[offset_in_block..offset_in_block + to_read_in_block]);
+
+                        bytes_read += to_read_in_block;
+                        current_offset += to_read_in_block as u64;
+                    }
+                    Err(e) if e.kind() == ErrorKind::NotFound => {
+                        #[cfg(feature = "std")]
+                        eprintln!("[inode_ref] Block is a hole");
+
+                        // 空洞，填充零
+                        buf[bytes_read..bytes_read + to_read_in_block].fill(0);
+                        bytes_read += to_read_in_block;
+                        current_offset += to_read_in_block as u64;
+                    }
+                    Err(e) => {
+                        #[cfg(feature = "std")]
+                        eprintln!("[inode_ref] Error getting block: {:?}", e);
+                        return Err(e);
+                    }
+                }
+            }
+
+            Ok(bytes_read)
+        }
     }
 
     /// 映射逻辑块号到物理块号（使用 extent，保证数据一致性）

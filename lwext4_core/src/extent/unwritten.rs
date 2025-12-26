@@ -41,10 +41,10 @@ pub const EXT_INIT_MAX_LEN: u16 = 1 << 15;
 pub const EXT_UNWRITTEN_MAX_LEN: u16 = EXT_INIT_MAX_LEN - 1;
 
 /// Extent 分裂标志：标记第一部分为 unwritten
-const EXT4_EXT_MARK_UNWRIT1: u32 = 0x02;
+pub(crate) const EXT4_EXT_MARK_UNWRIT1: u32 = 0x02;
 
 /// Extent 分裂标志：标记第二部分为 unwritten
-const EXT4_EXT_MARK_UNWRIT2: u32 = 0x04;
+pub(crate) const EXT4_EXT_MARK_UNWRIT2: u32 = 0x04;
 
 /// 标记 extent 为已初始化（written）
 ///

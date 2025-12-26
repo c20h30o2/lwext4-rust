@@ -74,6 +74,9 @@ pub mod block_group;
 /// Extent 树操作
 pub mod extent;
 
+/// Indirect blocks 操作（传统 ext2/ext3 间接块寻址）
+pub mod indirect;
+
 /// 目录操作
 pub mod dir;
 
@@ -131,6 +134,9 @@ pub use block_group::{BlockGroup, read_block_group_desc, write_block_group_desc}
 
 // Extent
 pub use extent::ExtentTree;
+
+// Indirect blocks
+pub use indirect::IndirectBlockMapper;
 
 // Dir
 pub use dir::{DirEntry, DirIterator, DirReader, PathLookup, read_dir, lookup_path, get_inode_ref_by_path};
