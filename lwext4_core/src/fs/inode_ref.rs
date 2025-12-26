@@ -781,13 +781,38 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
     ///
     /// 此方法会根据 inode 的标志自动选择 extent 或 indirect blocks 映射
     pub fn read_extent_file(&mut self, offset: u64, buf: &mut [u8]) -> Result<usize> {
-        // 检查文件类型 - 符号链接应该使用 readlink，不能当作文件读取
+        // 特殊处理符号链接：VFS 层通过 read_at() 调用 read_extent_file() 来读取符号链接内容
         let is_symlink = self.with_inode(|inode| inode.is_symlink())?;
         if is_symlink {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Cannot read symlink as regular file - use readlink instead",
-            ));
+            let file_size = self.size()?;
+
+            // 快速符号链接：目标路径存储在 inode.blocks 中（< 60 字节）
+            if file_size < 60 {
+                if offset >= file_size {
+                    return Ok(0); // EOF
+                }
+
+                let to_read = buf.len().min((file_size - offset) as usize);
+
+                return self.with_inode(|inode| {
+                    // 从 inode.blocks 读取字节数据
+                    let symlink_data = unsafe {
+                        core::slice::from_raw_parts(
+                            inode.blocks.as_ptr() as *const u8,
+                            file_size as usize,
+                        )
+                    };
+
+                    buf[..to_read].copy_from_slice(
+                        &symlink_data[offset as usize..offset as usize + to_read]
+                    );
+
+                    to_read
+                })
+                .map_err(|_| Error::new(ErrorKind::Io, "Failed to read fast symlink"));
+            }
+            // 慢速符号链接：目标路径存储在数据块中（≥ 60 字节）
+            // 继续正常的文件读取流程
         }
 
         // 检查文件大小
