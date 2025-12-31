@@ -453,7 +453,9 @@ impl BlockCache {
         self.ref_blocks = self.ref_blocks.saturating_sub(1);
 
         // 如果引用计数降为 0，加入 LRU 索引
-        if !buf.is_referenced() {
+        // ⚠️ 但是 dirty 块不应该被加入 LRU！dirty 块即使 refctr = 0 也不应该被驱逐
+        // 它们应该保持在缓存中直到写回磁盘
+        if !buf.is_referenced() && !buf.is_dirty() {
             let lru_id = buf.lru_id;
             let buf_id = buf.id;
             self.lru_index.insert(lru_id, buf_id);
@@ -636,6 +638,12 @@ impl BlockCache {
                     if is_ok {
                         buf.mark_clean();
                         flushed += 1;
+                        // 如果块的引用计数为 0，现在可以加入 LRU 索引了
+                        // （之前 dirty 时不能加入 LRU）
+                        if !buf.is_referenced() {
+                            let lru_id = buf.lru_id;
+                            self.lru_index.insert(lru_id, id);
+                        }
                     } else {
                         // 写入失败，重新加入脏列表
                         self.dirty_list.push_back(id);
@@ -696,6 +704,11 @@ impl BlockCache {
                     // 从脏列表中移除
                     if let Some(index) = self.dirty_list.iter().position(|x| x == &id) {
                         self.dirty_list.remove(index);
+                    }
+                    // 如果块的引用计数为 0，现在可以加入 LRU 索引了
+                    if !buf.is_referenced() {
+                        let lru_id = buf.lru_id;
+                        self.lru_index.insert(lru_id, id);
                     }
                 } else {
                     return Err(Error::new(ErrorKind::Io, "Failed to write block"));

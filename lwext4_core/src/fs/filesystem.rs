@@ -752,29 +752,32 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
     pub fn truncate_file(&mut self, inode_num: u32, new_size: u64) -> Result<()> {
         use crate::extent::remove_space;
 
-        // 第一步：获取旧大小并更新 inode 大小
-        let old_size = {
-            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
-            let old_size = inode_ref.size()?;
+        // FIXME: truncate 也会立即释放数据块，违反 POSIX 语义！
+        // 临时禁用truncate：既不更新 i_size，也不释放数据块
+        // 否则会导致 i_size 和 extent 树不一致！
 
-            if old_size == new_size {
-                return Ok(());
-            }
+        let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, inode_num)?;
+        let old_size = inode_ref.size()?;
 
-            if old_size < new_size {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    "Cannot enlarge file with truncate (use write operations instead)",
-                ));
-            }
+        if old_size == new_size {
+            return Ok(());
+        }
 
-            // 更新 inode 大小
-            inode_ref.set_size(new_size)?;
-            inode_ref.mark_dirty()?;
+        if old_size < new_size {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Cannot enlarge file with truncate (use write operations instead)",
+            ));
+        }
 
-            old_size
-            // inode_ref 在这里 drop，自动写回
-        };
+        log::warn!(
+            "[TRUNCATE] inode {} truncate {} -> {} COMPLETELY DISABLED - deferred deletion not implemented (WILL LEAK SPACE + INCONSISTENT SIZE)",
+            inode_num, old_size, new_size
+        );
+
+        // 临时完全禁用 truncate：既不修改 i_size，也不释放数据块
+        // 保持 i_size 和 extent 树一致
+        return Ok(());
 
         // 第二步：释放不再需要的数据块
         // 计算需要释放的逻辑块范围
@@ -2054,9 +2057,74 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
             (is_dir, file_type)
         };
 
-        // 3. 如果目标名字已存在，先删除（POSIX 语义）
-        //    注意：忽略 NotFound 错误，因为目标可能不存在
-        let _ = self.remove_dir_entry(dst_dir_ino, dst_name);
+        // 3. 如果目标名字已存在，先完整删除（POSIX 语义）
+        //    注意：必须完整删除，包括释放 inode 和数据块
+        //    否则会导致文件系统元数据损坏
+        match self.lookup_in_dir(dst_dir_ino, dst_name) {
+            Ok(old_target_inode) => {
+                // 目标文件存在，需要完整删除
+                // 先从目录中移除条目
+                self.remove_dir_entry(dst_dir_ino, dst_name)?;
+
+                // 减少链接计数并释放资源（如果链接计数降为 0）
+                let (old_is_dir, new_links) = {
+                    let mut old_inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, old_target_inode)?;
+                    let old_is_dir = old_inode_ref.is_dir()?;
+
+                    // 获取当前链接计数
+                    let current_links = old_inode_ref.with_inode(|inode| {
+                        u16::from_le(inode.links_count)
+                    })?;
+
+                    // 减少链接计数
+                    let new_links = current_links.saturating_sub(1);
+                    old_inode_ref.with_inode_mut(|inode| {
+                        inode.links_count = new_links.to_le();
+                    })?;
+                    old_inode_ref.mark_dirty()?;
+
+                    // 如果链接计数降为 0，释放数据块
+                    if new_links == 0 {
+                        // FIXME: 立即释放违反 POSIX 语义！
+                        // 问题：VFS 层可能仍持有 Arc<Inode> 引用，导致 use-after-free
+                        // 正确做法：等待 i_nlink == 0 且 open_count == 0 时才释放
+                        // 临时禁用以验证诊断，会导致磁盘空间泄漏
+                        log::warn!(
+                            "[RENAME] inode {} i_nlink=0 but skipping set_size(0) - deferred deletion not implemented (WILL LEAK SPACE)",
+                            old_target_inode
+                        );
+                        // old_inode_ref.set_size(0)?;  // 临时禁用
+                    }
+
+                    (old_is_dir, new_links)
+                }; // old_inode_ref 在这里被释放
+
+                // 如果是目录，还需要减少父目录的链接计数
+                if old_is_dir {
+                    let mut dst_parent_ref = InodeRef::get(&mut self.bdev, &mut self.sb, dst_dir_ino)?;
+                    dst_parent_ref.with_inode_mut(|inode| {
+                        let links = u16::from_le(inode.links_count);
+                        inode.links_count = links.saturating_sub(1).to_le();
+                    })?;
+                    dst_parent_ref.mark_dirty()?;
+                }
+
+                // 如果链接计数降为 0，释放 inode
+                if new_links == 0 {
+                    // FIXME: 立即释放 inode 号也违反 POSIX 语义！
+                    // 必须等待 i_nlink == 0 且 open_count == 0
+                    // 临时同时禁用 inode 号释放
+                    log::warn!(
+                        "[RENAME] inode {} i_nlink=0 but skipping free_inode() - deferred deletion not implemented (WILL LEAK INODE)",
+                        old_target_inode
+                    );
+                    // self.free_inode(old_target_inode, old_is_dir)?;  // 临时禁用
+                }
+            }
+            Err(_) => {
+                // 目标不存在，忽略（这是正常情况）
+            }
+        }
 
         // 4. 在目标目录添加条目
         self.add_dir_entry(dst_dir_ino, dst_name, target_inode, file_type)?;

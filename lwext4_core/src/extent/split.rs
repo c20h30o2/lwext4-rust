@@ -533,7 +533,7 @@ pub(super) fn read_extents_from_block<D: BlockDevice>(
 }
 
 /// 从 inode 读取 index 数组
-fn read_indices_from_inode<D: BlockDevice>(
+pub(super) fn read_indices_from_inode<D: BlockDevice>(
     inode_ref: &mut InodeRef<D>,
 ) -> Result<(Vec<ext4_extent_idx>, ext4_extent_header)> {
     inode_ref.with_inode(|inode| {

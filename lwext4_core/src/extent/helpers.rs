@@ -198,8 +198,8 @@ pub unsafe fn EXT_HAS_FREE_INDEX(header: *const ext4_extent_header) -> bool {
 /// * `idx` - index 引用
 /// * `pblock` - 物理块号
 pub fn ext4_idx_store_pblock(idx: &mut ext4_extent_idx, pblock: u64) {
-    idx.leaf_lo = (pblock & 0xFFFFFFFF) as u32;
-    idx.leaf_hi = ((pblock >> 32) & 0xFFFF) as u16;
+    idx.leaf_lo = ((pblock & 0xFFFFFFFF) as u32).to_le();
+    idx.leaf_hi = (((pblock >> 32) & 0xFFFF) as u16).to_le();
 }
 
 /// 读取 index 的物理块号
@@ -228,8 +228,8 @@ pub fn ext4_idx_pblock(idx: &ext4_extent_idx) -> u64 {
 /// * `extent` - extent 引用
 /// * `pblock` - 物理块号
 pub fn ext4_ext_store_pblock(extent: &mut ext4_extent, pblock: u64) {
-    extent.start_lo = (pblock & 0xFFFFFFFF) as u32;
-    extent.start_hi = ((pblock >> 32) & 0xFFFF) as u16;
+    extent.start_lo = ((pblock & 0xFFFFFFFF) as u32).to_le();
+    extent.start_hi = (((pblock >> 32) & 0xFFFF) as u16).to_le();
 }
 
 /// 读取 extent 的物理块号
@@ -246,7 +246,27 @@ pub fn ext4_ext_store_pblock(extent: &mut ext4_extent, pblock: u64) {
 pub fn ext4_ext_pblock(extent: &ext4_extent) -> u64 {
     let lo = u32::from_le(extent.start_lo) as u64;
     let hi = u16::from_le(extent.start_hi) as u64;
-    lo | (hi << 32)
+    let pblock = lo | (hi << 32);
+
+    // 添加调试日志来追踪读取的 extent
+    log::trace!(
+        "[EXTENT_READ] ext4_ext_pblock: start_lo=0x{:x}, start_hi=0x{:x}, logical={}, len={}, pblock=0x{:x}",
+        extent.start_lo, extent.start_hi,
+        u32::from_le(extent.block), u16::from_le(extent.len),
+        pblock
+    );
+
+    // 检测异常值（超过设备容量）
+    if pblock > 2097152 {
+        log::warn!(
+            "[EXTENT_READ] ⚠️ SUSPICIOUS pblock=0x{:x} (decimal: {}) - EXCEEDS DEVICE CAPACITY! extent: logical={}, len={}, start_lo=0x{:x}, start_hi=0x{:x}",
+            pblock, pblock,
+            u32::from_le(extent.block), u16::from_le(extent.len),
+            extent.start_lo, extent.start_hi
+        );
+    }
+
+    pblock
 }
 
 /// 计算 inode 内部作为 index root 的最大条目数

@@ -508,6 +508,16 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
         self.bdev
     }
 
+    /// 获取 inode 所在的块地址
+    pub fn inode_block_addr(&self) -> u64 {
+        self.inode_block_addr
+    }
+
+    /// 获取 inode 在块内的偏移
+    pub fn offset_in_block(&self) -> usize {
+        self.offset_in_block
+    }
+
     /// 将逻辑块号映射到物理块号
     ///
     /// 对应 lwext4 的 `ext4_fs_get_inode_dblk_idx()`
@@ -582,8 +592,23 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
 
                 let mut allocator = BlockAllocator::new();
 
+                // 完全禁用推测性分配：只分配实际需要的块
+                //
+                // 背景：磁盘空间有限（rootfs 镜像可能只有 100-200MB）
+                // 即使保守的预分配策略也会导致空间耗尽
+                //
+                // 策略：只分配 1 个块
+                // - 优点：最大化空间利用率
+                // - 缺点：可能创建更多 extent，但 insert_extent_with_auto_split 会自动处理
+                //
+                // 注意：insert_extent_with_auto_split() 会自动：
+                // - grow_tree_depth 当根节点满时
+                // - 插入到深度 1 的叶节点
+                // 所以即使每个块一个 extent 也能正常工作
+                let speculative_blocks = 1;
+
                 let (physical_block, _allocated_count) =
-                    get_blocks(self, sb_ref, &mut allocator, logical_block, 1, true)?;
+                    get_blocks(self, sb_ref, &mut allocator, logical_block, speculative_blocks, true)?;
 
                 if physical_block == 0 {
                     Err(Error::new(

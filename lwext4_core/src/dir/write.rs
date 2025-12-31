@@ -625,7 +625,6 @@ pub fn append_new_block<D: BlockDevice>(
     file_type: u8,
     required_len: u16,
 ) -> Result<()> {
-    use crate::balloc::{BlockAllocator, alloc_block_with_inode};
 
     let block_size = sb.block_size();
     let has_csum = sb.has_ro_compat_feature(EXT4_FEATURE_RO_COMPAT_METADATA_CSUM);
@@ -634,27 +633,23 @@ pub fn append_new_block<D: BlockDevice>(
     let current_size = inode_ref.size()?;
     let logical_block = (current_size / block_size as u64) as u32;
 
-    // 分配新的物理块
+    // 使用 extent::get_blocks() 分配新块并更新 extent tree
+    // 这会自动处理：
+    // 1. 分配物理块
+    // 2. 更新 extent tree（添加新的 extent 或扩展现在 extent）
+    // 3. 更新 inode 的 blocks 计数
+    use crate::extent::get_blocks;
+    use crate::balloc::BlockAllocator;
+
     let mut allocator = BlockAllocator::new();
-    let goal = if logical_block > 0 {
-        // 尝试在上一个块附近分配
-        inode_ref.get_inode_dblk_idx(logical_block - 1, false).unwrap_or(0)
-    } else {
-        0
-    };
 
-    // 分配块（分两步避免借用冲突）
-    let new_block_addr = {
-        let bdev = inode_ref.bdev();
-        allocator.alloc_block(bdev, sb, goal)?
-    };
+    log::info!("[append_new_block] Allocating logical block {} for inode {}",
+               logical_block, inode_ref.index());
 
-    // 更新 inode blocks 计数
-    inode_ref.add_blocks(1)?;
+    let (new_block_addr, _count) = get_blocks(inode_ref, sb, &mut allocator, logical_block, 1, true)?;
 
-    // ⚠️ TODO: 这里需要插入 extent 映射
-    // 当前简化版本假设目录很小，不处理 extent 树的扩展
-    // 完整实现需要调用 extent tree 的 insert 操作
+    log::info!("[append_new_block] Allocated physical block {} for logical block {}",
+               new_block_addr, logical_block);
 
     // 初始化新块
     let uuid = sb.inner().uuid;
@@ -734,8 +729,8 @@ pub fn dir_init<D: BlockDevice>(
     let block_size = dir_inode_ref.sb().block_size();
     let has_csum = dir_inode_ref.sb().has_ro_compat_feature(EXT4_FEATURE_RO_COMPAT_METADATA_CSUM);
 
-    // 获取第一个块
-    let block_addr = dir_inode_ref.get_inode_dblk_idx(0, false)?;
+    // 获取或分配第一个块（新目录需要创建块）
+    let block_addr = dir_inode_ref.get_inode_dblk_idx(0, true)?;
 
     // 提取需要的数据
     let uuid = dir_inode_ref.sb().inner().uuid;
@@ -787,6 +782,9 @@ pub fn dir_init<D: BlockDevice>(
 
     drop(block);
 
+    // 更新目录 inode 的 size（一个块）
+    dir_inode_ref.set_size(block_size as u64)?;
+
     Ok(())
 }
 
@@ -822,8 +820,8 @@ pub fn dx_init<D: BlockDevice>(
     let block_size = dir_inode_ref.sb().block_size();
     let has_csum = dir_inode_ref.sb().has_ro_compat_feature(EXT4_FEATURE_RO_COMPAT_METADATA_CSUM);
 
-    // 获取第一个块（根块）
-    let block_addr = dir_inode_ref.get_inode_dblk_idx(0, false)?;
+    // 获取或分配第一个块（根块）（新目录需要创建块）
+    let block_addr = dir_inode_ref.get_inode_dblk_idx(0, true)?;
 
     // 提取需要的数据
     let uuid = dir_inode_ref.sb().inner().uuid;
@@ -909,6 +907,9 @@ pub fn dx_init<D: BlockDevice>(
     })?;
 
     drop(block);
+
+    // 更新目录 inode 的 size（一个块）
+    dir_inode_ref.set_size(block_size as u64)?;
 
     Ok(())
 }

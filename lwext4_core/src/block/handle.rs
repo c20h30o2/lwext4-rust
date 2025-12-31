@@ -95,20 +95,23 @@ impl<'a, D: BlockDevice> Block<'a, D> {
 
             if is_new {
                 // 新分配的块，需要从磁盘读取
-                // 先临时释放 cache 的借用
-                // bug: 这里释放后，之后再次alloc之间可能导致块被lru驱逐
-                cache.free(lba)?;
+                // ⚠️ 不能调用 cache.free()！否则块会被加入 LRU 索引，可能在读取期间被驱逐
+                // 解决方案：先读取到临时缓冲区，然后通过 alloc 的引用填充数据
 
-                // 现在可以访问 block_dev 了
+                // 先读取数据到临时缓冲区（此时 refctr = 1，块不会被驱逐）
                 block_dev.inc_physical_read_count();
                 let mut temp_buf = alloc::vec![0u8; block_size];
                 block_dev.device_mut().read_blocks(pba, count, &mut temp_buf)?;
 
-                // 重新获取缓存块并填充数据
+                // 重新获取缓存块引用并填充数据
+                // 注意：第一次 alloc 的引用仍然有效（refctr = 1），
+                // 这里再次 alloc 会增加到 refctr = 2
                 let (cache_buf, _) = block_dev.bcache.as_mut().unwrap().alloc(lba)?;
                 cache_buf.data.copy_from_slice(&temp_buf);
                 cache_buf.mark_uptodate();
-                // 保持引用计数（alloc 已经+1）
+                // 现在 refctr = 2（第一次 alloc + 第二次 alloc）
+                // Block::drop 会调用 free 一次 → refctr = 1
+                // 仍然 > 0，不会加入 LRU 索引
             }
 
             // alloc() 内部已经调用 find_get() 增加了引用计数
@@ -216,9 +219,11 @@ impl<'a, D: BlockDevice> Block<'a, D> {
     {
         if let Some(cache) = &mut self.block_dev.bcache {
             // 有缓存：临时获取缓存块引用
-            let (cache_buf, _) = cache.alloc(self.lba)?;
+            let (cache_buf, _) = cache.alloc(self.lba)?;  // refctr + 1
             let result = f(&cache_buf.data);
-            cache.free(self.lba)?;
+            cache.free(self.lba)?;  // refctr - 1，平衡引用计数
+            // 注意：即使调用 free，如果 Block::get 持有引用（refctr >= 1），
+            // 块仍然不会被加入 LRU 索引（因为 refctr > 0）
             Ok(result)
         } else if let Some(data) = &self.local_data {
             // 无缓存：使用本地副本
@@ -246,13 +251,15 @@ impl<'a, D: BlockDevice> Block<'a, D> {
     {
         if let Some(cache) = &mut self.block_dev.bcache {
             // 有缓存：临时获取缓存块可变引用
-            let (cache_buf, _) = cache.alloc(self.lba)?;
+            let (cache_buf, _) = cache.alloc(self.lba)?;  // refctr + 1
             let result = f(&mut cache_buf.data);
             // 标记为脏
             cache_buf.mark_dirty();
             // 将块加入脏列表
             cache.mark_dirty(self.lba)?;
-            cache.free(self.lba)?;
+            cache.free(self.lba)?;  // refctr - 1，平衡引用计数
+            // ✅ 关键修复：dirty 块即使 refctr = 0 也不会被加入 LRU（见 BlockCache::free）
+            // 这样 dirty 块会一直保留在缓存中，直到写回磁盘后才能被驱逐
             Ok(result)
         } else if let Some(data) = &mut self.local_data {
             // 无缓存：修改本地副本并标记为脏

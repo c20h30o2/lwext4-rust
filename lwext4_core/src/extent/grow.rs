@@ -83,6 +83,11 @@ pub fn grow_tree_depth<D: BlockDevice>(
     let old_depth = old_header.depth();
     let new_depth = old_depth + 1;
 
+    log::debug!(
+        "[GROW_TREE] Starting grow_tree_depth: old_depth={}, new_depth={}, is_leaf={}",
+        old_depth, new_depth, is_leaf
+    );
+
     // 2. 分配新的物理块
     let new_block = allocator.alloc_block(
         inode_ref.bdev(),
@@ -90,9 +95,15 @@ pub fn grow_tree_depth<D: BlockDevice>(
         0, // goal = 0 让 balloc 自己选择
     )?;
 
+    log::debug!(
+        "[GROW_TREE] Allocated new block: 0x{:x} (decimal: {})",
+        new_block, new_block
+    );
+
     // 3. 将当前根节点内容复制到新块
     if is_leaf {
         // 根节点是叶子，复制 extent 数组
+        log::debug!("[GROW_TREE] Copying extents to new block 0x{:x}", new_block);
         copy_extents_to_new_block(
             inode_ref,
             new_block,
@@ -101,6 +112,7 @@ pub fn grow_tree_depth<D: BlockDevice>(
         )?;
     } else {
         // 根节点是索引节点，复制 index 数组
+        log::debug!("[GROW_TREE] Copying indices to new block 0x{:x}", new_block);
         copy_indices_to_new_block(
             inode_ref,
             new_block,
@@ -112,11 +124,17 @@ pub fn grow_tree_depth<D: BlockDevice>(
 
     // 4. 在 inode 中创建新的根节点
     // 新根节点是索引节点，只包含一个 index 指向刚才分配的块
+    log::debug!(
+        "[GROW_TREE] Creating new root in inode: depth={}, pointing to block 0x{:x}",
+        new_depth, new_block
+    );
     create_new_root_in_inode(
         inode_ref,
         new_depth,
         new_block,
     )?;
+
+    log::debug!("[GROW_TREE] grow_tree_depth completed successfully");
 
     Ok(new_block)
 }
@@ -298,6 +316,14 @@ fn create_new_root_in_inode<D: BlockDevice>(
         first_idx.block = 0u32.to_le(); // 第一个 index 覆盖从逻辑块 0 开始
         ext4_idx_store_pblock(first_idx, child_block);
         first_idx.unused = 0u16.to_le();
+
+        log::debug!(
+            "[GROW_TREE] Wrote index to root: block=0, child_block=0x{:x}, leaf_lo=0x{:x}, leaf_hi=0x{:x}",
+            child_block, first_idx.leaf_lo, first_idx.leaf_hi
+        );
+
+        // 打印整个 inode.blocks 的前 28 字节（header 12 + index 12 + 额外 4）
+        log::debug!("[GROW_TREE] inode.blocks[0..28]: {:02x?}", &data[..28]);
     })?;
 
     inode_ref.mark_dirty();

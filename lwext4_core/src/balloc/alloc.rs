@@ -477,8 +477,47 @@ pub fn alloc_blocks<D: BlockDevice>(
     goal: u64,
     max_count: u32,
 ) -> Result<(u64, u32)> {
-    // Phase 1: 只支持单块组分配
-    alloc_blocks_in_group(bdev, sb, goal, max_count)
+    // 首先尝试在 goal 所在的块组中分配
+    let result = alloc_blocks_in_group(bdev, sb, goal, max_count);
+
+    // 如果成功，直接返回
+    if result.is_ok() {
+        return result;
+    }
+
+    // 如果失败（可能是块组满了），尝试其他块组
+    // 遍历所有块组寻找空闲块
+    let bg_count = sb.block_group_count();
+    let first_data_block = sb.first_data_block() as u64;
+
+    for bgid in 0..bg_count {
+        // 跳过已经尝试过的块组
+        let bgid_of_goal = get_bgid_of_block(sb, goal);
+        if bgid == bgid_of_goal {
+            continue;
+        }
+
+        // 计算该块组的第一个数据块作为新的 goal
+        let blocks_per_group = sb.blocks_per_group();
+        let bg_first_block = first_data_block + (bgid as u64 * blocks_per_group as u64);
+
+        // 尝试在这个块组中分配
+        match alloc_blocks_in_group(bdev, sb, bg_first_block, max_count) {
+            Ok(allocation) => {
+                return Ok(allocation);
+            }
+            Err(_) => {
+                // 这个块组也满了，继续尝试下一个
+                continue;
+            }
+        }
+    }
+
+    // 所有块组都满了，返回错误
+    Err(Error::new(
+        ErrorKind::NoSpace,
+        "No free blocks available in any block group",
+    ))
 }
 
 #[cfg(test)]
