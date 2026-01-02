@@ -51,6 +51,9 @@ pub struct InodeRef<'a, D: BlockDevice> {
     offset_in_block: usize,
     /// 是否已标记为脏
     dirty: bool,
+    /// 块映射缓存：(logical_block, physical_block)
+    /// 用于加速重复的extent树查找
+    block_map_cache: Option<(u32, u64)>,
 }
 
 impl<'a, D: BlockDevice> InodeRef<'a, D> {
@@ -111,6 +114,7 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
             inode_block_addr,
             offset_in_block,
             dirty: false,
+            block_map_cache: None,
         })
     }
 
@@ -566,6 +570,13 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
         } else {
             // 使用 extent 树映射
             if !create {
+                // 检查缓存
+                if let Some((cached_logical, cached_physical)) = self.block_map_cache {
+                    if cached_logical == logical_block {
+                        return Ok(cached_physical);
+                    }
+                }
+
                 // 只读模式：使用 ExtentTree 查找
                 // 注意：这里使用快照是安全的，因为：
                 // 1. self (InodeRef) 持有对 inode 块的独占访问
@@ -575,7 +586,11 @@ impl<'a, D: BlockDevice> InodeRef<'a, D> {
                 let mut extent_tree = ExtentTree::new(self.bdev, self.sb.block_size());
 
                 match extent_tree.map_block_internal(&inode_copy, logical_block)? {
-                    Some(physical_block) => Ok(physical_block),
+                    Some(physical_block) => {
+                        // 更新缓存
+                        self.block_map_cache = Some((logical_block, physical_block));
+                        Ok(physical_block)
+                    }
                     None => Err(Error::new(
                         ErrorKind::NotFound,
                         "Logical block not found in extent tree",

@@ -79,6 +79,8 @@ pub struct FileMetadata {
     pub ctime: i64,
     /// 硬链接数
     pub links_count: u16,
+    /// 占用的块数（512 字节块）
+    pub blocks_count: u64,
 }
 
 impl FileMetadata {
@@ -97,6 +99,7 @@ impl FileMetadata {
             mtime: inode.modification_time() as i64,
             ctime: inode.change_time() as i64,
             links_count: inode.links_count(),
+            blocks_count: inode.blocks_count(),
         }
     }
 

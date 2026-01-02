@@ -735,8 +735,20 @@ impl ext4_extent_idx {
 
     /// 获取指向的物理块号（合并高低位）
     pub fn leaf_block(&self) -> u64 {
-        (u32::from_le(self.leaf_lo) as u64)
-            | ((u16::from_le(self.leaf_hi) as u64) << 32)
+        let lo = u32::from_le(self.leaf_lo) as u64;
+        let hi = u16::from_le(self.leaf_hi) as u64;
+        let pblock = lo | (hi << 32);
+
+        // 验证读取的物理块号是否合理
+        // 如果leaf_hi非零，可能是损坏的extent index数据
+        if hi > 0 {
+            log::warn!(
+                "[ext4_extent_idx::leaf_block] Reading extent index with non-zero leaf_hi: leaf_lo={:#x}, leaf_hi={:#x} ({} decimal), pblock={:#x}",
+                lo as u32, hi as u16, hi, pblock
+            );
+        }
+
+        pblock
     }
 }
 

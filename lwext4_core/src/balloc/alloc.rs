@@ -10,7 +10,7 @@ use crate::{
     fs::BlockGroupRef,
     superblock::Superblock,
 };
-
+use log::*;
 use super::{checksum::*, helpers::*};
 
 /// 块分配器状态
@@ -174,6 +174,24 @@ impl BlockAllocator {
         if let Some(idx) = alloc_opt {
             // 计算绝对地址
             let alloc = bg_idx_to_addr(sb, idx, bgid);
+
+            // 🔧 验证分配的块号
+            let device_total = bdev.total_blocks();
+            if alloc >= device_total {
+                log::error!(
+                    "[try_alloc_in_group] INVALID block allocated: {:#x} (exceeds device total {}), idx={}, bgid={}",
+                    alloc, device_total, idx, bgid
+                );
+                return Err(Error::new(
+                    ErrorKind::Corrupted,
+                    "Allocated block exceeds device size",
+                ));
+            }
+
+            log::info!(
+                "[try_alloc_in_group] Allocated block: {:#x} (idx={}, bgid={})",
+                alloc, idx, bgid
+            );
 
             // 第三步：更新块组描述符
             {
@@ -477,12 +495,35 @@ pub fn alloc_blocks<D: BlockDevice>(
     goal: u64,
     max_count: u32,
 ) -> Result<(u64, u32)> {
+    let device_total = bdev.total_blocks();
+
+    info!(
+        "[BALLOC] Requesting {} blocks, goal={:#x}, device_total={}",
+        max_count, goal, device_total
+    );
+
     // 首先尝试在 goal 所在的块组中分配
     let result = alloc_blocks_in_group(bdev, sb, goal, max_count);
 
     // 如果成功，直接返回
-    if result.is_ok() {
-        return result;
+    if let Ok((start_block, count)) = result {
+        // 验证分配的块是否在设备范围内
+        if start_block + count as u64 > device_total {
+            error!(
+                "[BALLOC] Allocated blocks OUT OF RANGE! start={:#x}, count={}, device_total={}",
+                start_block, count, device_total
+            );
+            return Err(Error::new(
+                ErrorKind::Corrupted,
+                "Allocated blocks exceed device size",
+            ));
+        }
+
+        info!(
+            "[BALLOC] Allocated {} blocks: start={:#x}, end={:#x}",
+            count, start_block, start_block + count as u64 - 1
+        );
+        return Ok((start_block, count));
     }
 
     // 如果失败（可能是块组满了），尝试其他块组
@@ -503,8 +544,24 @@ pub fn alloc_blocks<D: BlockDevice>(
 
         // 尝试在这个块组中分配
         match alloc_blocks_in_group(bdev, sb, bg_first_block, max_count) {
-            Ok(allocation) => {
-                return Ok(allocation);
+            Ok((start_block, count)) => {
+                // 验证分配的块是否在设备范围内
+                if start_block + count as u64 > device_total {
+                    error!(
+                        "[BALLOC] Allocated blocks OUT OF RANGE (fallback)! start={:#x}, count={}, device_total={}",
+                        start_block, count, device_total
+                    );
+                    return Err(Error::new(
+                        ErrorKind::Corrupted,
+                        "Allocated blocks exceed device size",
+                    ));
+                }
+
+                info!(
+                    "[BALLOC] Allocated {} blocks (fallback to bg {}): start={:#x}",
+                    count, bgid, start_block
+                );
+                return Ok((start_block, count));
             }
             Err(_) => {
                 // 这个块组也满了，继续尝试下一个

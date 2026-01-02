@@ -336,24 +336,48 @@ fn insert_parent_index<D: BlockDevice>(
     physical_block: u64,
 ) -> Result<()> {
     // 如果child是根节点，需要增加树深度
-    if child_at == 0 {
+    let parent_at = if child_at == 0 {
         // 调用 grow_tree_depth 增加树的深度
         // grow_tree_depth 会将当前根节点移到新块，并创建新的根索引节点
+        // 新根节点包含一个指向旧根内容的索引（逻辑块0）
         crate::extent::grow_tree_depth(inode_ref, sb, allocator)?;
 
-        // 注意：grow_tree_depth 已经完成了所有必要的索引插入
-        // 新根节点会包含一个指向旧根内容的索引
-        // 这里不需要再插入 first_block/physical_block，
-        // 因为分裂逻辑已经完成了必要的更新
-        return Ok(());
-    }
-
-    // 否则，在父节点插入索引
-    let parent_at = child_at - 1;
+        // 🔧 BUG FIX: 不要直接返回！
+        // grow_tree_depth 只插入了指向原root内容的第一个索引
+        // 我们还需要在新root中插入第二个索引，指向分裂出的右半部分（physical_block）
+        // 新root就是parent_at=0
+        log::debug!(
+            "[insert_parent_index] After grow_tree_depth, inserting second index: first_block={}, physical_block={:#x}",
+            first_block, physical_block
+        );
+        0
+    } else {
+        child_at - 1
+    };
 
     // 检查父节点是否有空间
-    let parent_node = &path.nodes[parent_at];
-    if parent_node.header.entries_count() >= parent_node.header.max_entries() {
+    // 注意：如果刚执行了grow_tree_depth，需要重新读取root header
+    let (parent_entries, parent_max_entries) = if child_at == 0 {
+        // grow_tree_depth之后，root已经是新的索引节点了
+        // 需要从inode重新读取header
+        inode_ref.with_inode(|inode| {
+            let data = unsafe {
+                core::slice::from_raw_parts(
+                    inode.blocks.as_ptr() as *const u8,
+                    60,
+                )
+            };
+            let header = unsafe {
+                *(data.as_ptr() as *const ext4_extent_header)
+            };
+            (header.entries_count(), header.max_entries())
+        })?
+    } else {
+        let parent_node = &path.nodes[parent_at];
+        (parent_node.header.entries_count(), parent_node.header.max_entries())
+    };
+
+    if parent_entries >= parent_max_entries {
         // 父节点也满了，需要先递归分裂父节点
         // 这里我们使用 first_block 作为分裂点的提示
         split_extent_node(

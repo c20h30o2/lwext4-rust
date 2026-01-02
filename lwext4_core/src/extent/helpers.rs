@@ -198,8 +198,30 @@ pub unsafe fn EXT_HAS_FREE_INDEX(header: *const ext4_extent_header) -> bool {
 /// * `idx` - index 引用
 /// * `pblock` - 物理块号
 pub fn ext4_idx_store_pblock(idx: &mut ext4_extent_idx, pblock: u64) {
+    // 🔧 验证输入的块号是否超出 48-bit 限制
+    if pblock > 0xFFFFFFFFFFFF {
+        log::error!(
+            "[ext4_idx_store_pblock] Invalid pblock: {:#x} (exceeds 48-bit limit)",
+            pblock
+        );
+    }
+
     idx.leaf_lo = ((pblock & 0xFFFFFFFF) as u32).to_le();
     idx.leaf_hi = (((pblock >> 32) & 0xFFFF) as u16).to_le();
+
+    // 🔧 验证写入结果
+    let reconstructed = ext4_idx_pblock(idx);
+    if reconstructed != pblock {
+        log::error!(
+            "[ext4_idx_store_pblock] Mismatch! input={:#x}, stored={:#x}, leaf_lo={:#x}, leaf_hi={:#x}",
+            pblock, reconstructed, u32::from_le(idx.leaf_lo), u16::from_le(idx.leaf_hi)
+        );
+    }
+
+    log::info!(
+        "[ext4_idx_store_pblock] Stored pblock={:#x} -> leaf_lo={:#x}, leaf_hi={:#x}",
+        pblock, u32::from_le(idx.leaf_lo), u16::from_le(idx.leaf_hi)
+    );
 }
 
 /// 读取 index 的物理块号
@@ -216,7 +238,19 @@ pub fn ext4_idx_store_pblock(idx: &mut ext4_extent_idx, pblock: u64) {
 pub fn ext4_idx_pblock(idx: &ext4_extent_idx) -> u64 {
     let lo = u32::from_le(idx.leaf_lo) as u64;
     let hi = u16::from_le(idx.leaf_hi) as u64;
-    lo | (hi << 32)
+    let pblock = lo | (hi << 32);
+
+    // 验证读取的物理块号是否合理
+    // ext4最大物理块地址是2^48-1，设备通常远小于此
+    // 如果leaf_hi非零且值很大，可能是损坏的数据
+    if hi > 0 {
+        log::warn!(
+            "[ext4_idx_pblock] Reading extent index with non-zero leaf_hi: leaf_lo={:#x}, leaf_hi={:#x} ({} decimal), pblock={:#x}",
+            lo as u32, hi as u16, hi, pblock
+        );
+    }
+
+    pblock
 }
 
 /// 存储 extent 的物理块号（48 位）

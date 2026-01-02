@@ -115,6 +115,7 @@ fn add_entry_linear<D: BlockDevice>(
     // 遍历目录的所有块，查找空闲空间
     let mut block_idx = 0_u32;
     loop {
+
         // 尝试获取当前块
         let block_addr = match inode_ref.get_inode_dblk_idx(block_idx, false) {
             Ok(addr) => addr,
@@ -468,8 +469,17 @@ fn find_and_insert_entry(
     required_len: u16,
 ) -> bool {
     let mut offset = 0;
+    let mut entries_checked = 0;
+
+    log::trace!(
+        "[find_and_insert_entry] START: name='{}', required_len={}, block_size={}",
+        name,
+        required_len,
+        data.len()
+    );
 
     while offset < data.len() {
+        entries_checked += 1;
         if offset + core::mem::size_of::<ext4_dir_entry>() > data.len() {
             break;
         }
@@ -503,6 +513,16 @@ fn find_and_insert_entry(
 
         // 检查是否有足够的空闲空间
         if free_space >= required_len {
+            log::trace!(
+                "[find_and_insert_entry] FOUND SPACE: offset={}, rec_len={}, actual_len={}, free_space={}, required_len={}, entry_inode={}, entries_checked={}",
+                offset,
+                rec_len,
+                actual_len,
+                free_space,
+                required_len,
+                entry_inode,
+                entries_checked
+            );
             // 找到合适的位置
             if entry_inode != 0 && actual_len > 0 {
                 // 分裂现有条目
@@ -532,6 +552,12 @@ fn find_and_insert_entry(
         offset += rec_len as usize;
     }
 
+    log::trace!(
+        "[find_and_insert_entry] NO SPACE: name='{}', entries_checked={}, final_offset={}",
+        name,
+        entries_checked,
+        offset
+    );
     false
 }
 

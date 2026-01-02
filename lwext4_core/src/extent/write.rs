@@ -39,6 +39,7 @@ use crate::{
     transaction::SimpleTransaction,
     types::{ext4_extent, ext4_extent_header, ext4_extent_idx},
 };
+use log::*;
 use alloc::vec::Vec;
 
 //=============================================================================
@@ -335,6 +336,12 @@ pub fn get_blocks<D: BlockDevice>(
     )?;
     allocated_count = actual_allocated;
 
+    // 记录块分配结果
+    info!(
+        "[EXTENT WRITE] Allocated blocks: logical={}, physical={:#x}, count={}, goal={:#x}",
+        logical_block, physical_block, actual_allocated, goal
+    );
+
     // 3.4 插入新 extent（支持自动 split/grow）
     // 与 lwext4 的 ext4_ext_insert_extent 行为一致
     //
@@ -354,11 +361,24 @@ pub fn get_blocks<D: BlockDevice>(
 
     match insert_result {
         Ok(_) => {
-            // 成功插入，返回分配的块
+            // 成功插入，更新 inode 的 blocks_count
+            // 注意：blocks_count 以 512 字节扇区为单位
+            inode_ref.add_blocks(allocated_count)?;
+
+            info!(
+                "[EXTENT WRITE] Successfully inserted extent: logical={}, physical={:#x} (hi={:#x}, lo={:#x}), count={}",
+                logical_block, physical_block,
+                (physical_block >> 32) as u16, physical_block as u32,
+                allocated_count
+            );
             Ok((physical_block, allocated_count))
         }
         Err(e) => {
             // 插入失败，释放已分配的块
+            error!(
+                "[EXTENT WRITE] Failed to insert extent: logical={}, physical={:#x}, error={:?}",
+                logical_block, physical_block, e
+            );
             let _ = balloc::free_blocks(
                 inode_ref.bdev(),
                 sb,

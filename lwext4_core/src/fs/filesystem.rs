@@ -1730,6 +1730,9 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
             _ => super::metadata::FileType::Unknown,
         };
 
+        // 读取块数（使用 blocks_count_with_sb 以正确处理 HUGE_FILE）
+        let blocks_count = inode_ref.blocks_count()?;
+
         Ok(FileMetadata {
             inode_num,
             file_type,
@@ -1741,6 +1744,7 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
             atime,
             mtime,
             ctime,
+            blocks_count,
         })
     }
 
@@ -1859,8 +1863,6 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
         {
             use crate::extent::tree_init;
 
-            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, new_inode)?;
-
             // 设置文件类型和权限
             let inode_mode = match file_type {
                 EXT4_DE_REG_FILE => EXT4_INODE_MODE_FILE,
@@ -1868,6 +1870,21 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
                 EXT4_DE_SYMLINK => EXT4_INODE_MODE_SOFTLINK,
                 _ => EXT4_INODE_MODE_FILE, // 默认为普通文件
             };
+
+            // 读取 superblock 的 extra_isize 配置（在创建 inode_ref 之前）
+            let inode_size = self.sb.inode_size();
+            let extra_isize = if inode_size > EXT4_GOOD_OLD_INODE_SIZE as u16 {
+                let want_extra_isize = u16::from_le(self.sb.inner().want_extra_isize);
+                if want_extra_isize > 0 {
+                    want_extra_isize
+                } else {
+                    32u16  // 默认值
+                }
+            } else {
+                0u16
+            };
+
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, new_inode)?;
 
             inode_ref.with_inode_mut(|inode| {
                 inode.mode = (inode_mode | mode).to_le();
@@ -1878,6 +1895,11 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
                 inode.atime = now.to_le();
                 inode.mtime = now.to_le();
                 inode.ctime = now.to_le();
+
+                // 设置 extra_isize
+                if extra_isize > 0 {
+                    inode.extra_isize = extra_isize.to_le();
+                }
             })?;
 
             // 设置 EXTENTS 标志（启用 extent 格式）

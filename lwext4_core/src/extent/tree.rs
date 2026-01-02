@@ -6,6 +6,7 @@ use crate::{
     inode::Inode,
     types::{ext4_extent, ext4_extent_header, ext4_extent_idx, ext4_inode},
 };
+use log::*;
 use alloc::vec;
 
 /// Extent 树遍历器
@@ -14,12 +15,18 @@ use alloc::vec;
 pub struct ExtentTree<'a, D: BlockDevice> {
     bdev: &'a mut BlockDev<D>,
     block_size: u32,
+    device_total_blocks: u64,
 }
 
 impl<'a, D: BlockDevice> ExtentTree<'a, D> {
     /// 创建新的 extent 树遍历器
     pub fn new(bdev: &'a mut BlockDev<D>, block_size: u32) -> Self {
-        Self { bdev, block_size }
+        let device_total_blocks = bdev.total_blocks();
+        Self {
+            bdev,
+            block_size,
+            device_total_blocks,
+        }
     }
 
 
@@ -126,7 +133,36 @@ impl<'a, D: BlockDevice> ExtentTree<'a, D> {
             // 检查逻辑块是否在这个 extent 范围内
             if logical_block >= extent_start && logical_block < extent_end {
                 let offset_in_extent = logical_block - extent_start;
-                let physical_block = extent.physical_block() + offset_in_extent as u64;
+                let extent_physical_base = extent.physical_block();
+                let physical_block = extent_physical_base + offset_in_extent as u64;
+
+                // 读取原始字段值用于日志
+                let start_lo = u32::from_le(extent.start_lo);
+                let start_hi = u16::from_le(extent.start_hi);
+
+                // 记录详细日志
+                info!(
+                    "[EXTENT READ] logical={}, found in extent[{}]: range=[{}-{}], \
+                     physical_base={:#x}, physical_result={:#x}, start_hi={:#x}, start_lo={:#x}",
+                    logical_block, i, extent_start, extent_end - 1,
+                    extent_physical_base, physical_block, start_hi, start_lo
+                );
+
+                // 🔧 边界检查：验证物理块号是否在设备范围内
+                if physical_block >= self.device_total_blocks {
+                    error!(
+                        "[EXTENT READ] Physical block OUT OF BOUNDS! \
+                         physical={:#x}, device_total={}, extent_base={:#x}, \
+                         start_hi={:#x}, start_lo={:#x}, offset_in_extent={}",
+                        physical_block, self.device_total_blocks,
+                        extent_physical_base, start_hi, start_lo, offset_in_extent
+                    );
+                    return Err(Error::new(
+                        ErrorKind::Corrupted,
+                        "Physical block address exceeds device size",
+                    ));
+                }
+
                 return Ok(Some(physical_block));
             }
         }
