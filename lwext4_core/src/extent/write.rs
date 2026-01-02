@@ -534,7 +534,7 @@ fn insert_extent_with_auto_split<D: BlockDevice>(
 fn read_first_leaf_block<D: BlockDevice>(inode_ref: &mut InodeRef<D>) -> Result<u64> {
     // 使用 with_inode_mut 而不是 with_inode 来读取
     // 这确保了我们能读到 grow_tree_depth 中 with_inode_mut 的最新修改
-    inode_ref.with_inode_mut(|inode| -> Result<u64> {
+    let (mut current_block, root_depth) = inode_ref.with_inode_mut(|inode| -> Result<(u64, u16)> {
         // 读取 extent header
         let header_ptr = inode.blocks.as_ptr() as *const ext4_extent_header;
         let header = unsafe { &*header_ptr };
@@ -556,21 +556,67 @@ fn read_first_leaf_block<D: BlockDevice>(inode_ref: &mut InodeRef<D>) -> Result<
         let idx = unsafe { &*idx_ptr };
 
         // 使用辅助函数而不是手动组合
-        let leaf_block = super::helpers::ext4_idx_pblock(idx);
+        let child_block = super::helpers::ext4_idx_pblock(idx);
 
         log::debug!(
-            "[READ_LEAF_BLOCK] depth={}, leaf_lo=0x{:x}, leaf_hi=0x{:x}, leaf_block=0x{:x}",
-            depth, u32::from_le(idx.leaf_lo), u16::from_le(idx.leaf_hi), leaf_block
+            "[READ_LEAF_BLOCK] root_depth={}, first_child=0x{:x}",
+            depth, child_block
         );
 
-        // 打印整个 inode.blocks 的前 28 字节（header 12 + index 12 + 额外 4）
-        let data_slice = unsafe {
-            core::slice::from_raw_parts(inode.blocks.as_ptr() as *const u8, 28)
-        };
-        log::debug!("[READ_LEAF_BLOCK] inode.blocks[0..28]: {:02x?}", data_slice);
+        Ok((child_block, depth))
+    })??;
 
-        Ok(leaf_block)
-    })?
+    // 🔧 BUG FIX: 递归遍历extent树直到找到真正的leaf节点（depth=0）
+    // 对于depth >= 2的树，root的第一个索引指向的是另一个index节点，不是leaf节点
+    let mut current_depth = root_depth - 1; // child节点的深度
+
+    while current_depth > 0 {
+        // 读取当前index节点的第一个索引
+        let block_size = inode_ref.bdev().block_size();
+        let mut block = crate::block::Block::get(inode_ref.bdev(), current_block)?;
+
+        let child_block = block.with_data(|data| {
+            let header = unsafe {
+                &*(data.as_ptr() as *const crate::types::ext4_extent_header)
+            };
+
+            if !header.is_valid() {
+                return Err(crate::error::Error::new(
+                    ErrorKind::Corrupted,
+                    "Invalid extent header in index node",
+                ));
+            }
+
+            let node_depth = u16::from_le(header.depth);
+            if node_depth != current_depth {
+                log::warn!(
+                    "[READ_LEAF_BLOCK] Depth mismatch: expected={}, actual={}",
+                    current_depth, node_depth
+                );
+            }
+
+            // 读取第一个索引
+            let header_size = core::mem::size_of::<crate::types::ext4_extent_header>();
+            let idx = unsafe {
+                &*((data.as_ptr() as *const u8).add(header_size) as *const crate::types::ext4_extent_idx)
+            };
+
+            let child = super::helpers::ext4_idx_pblock(idx);
+
+            log::debug!(
+                "[READ_LEAF_BLOCK] Traversing: block=0x{:x}, depth={} -> child=0x{:x}",
+                current_block, current_depth, child
+            );
+
+            Ok(child)
+        })??;
+
+        current_block = child_block;
+        current_depth -= 1;
+    }
+
+    log::debug!("[READ_LEAF_BLOCK] Found leaf block: 0x{:x}", current_block);
+    Ok(current_block)
 }
 
 /// 直接插入 extent 到指定的叶子块（支持分裂）
