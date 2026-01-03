@@ -189,6 +189,23 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
         })
     }
 
+    /// 刷新所有缓存的脏数据到磁盘
+    ///
+    /// 该方法会将块缓存中的所有脏块写回磁盘，并调用设备的硬件刷新。
+    ///
+    /// # 返回
+    ///
+    /// 成功返回 Ok(())，失败返回错误
+    ///
+    /// # 示例
+    ///
+    /// ```rust,ignore
+    /// fs.flush()?; // 确保所有数据写入磁盘
+    /// ```
+    pub fn flush(&mut self) -> Result<()> {
+        self.bdev.flush()
+    }
+
     /// 获取 inode 引用
     ///
     /// # 参数
@@ -2105,17 +2122,14 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
                     })?;
                     old_inode_ref.mark_dirty()?;
 
-                    // 如果链接计数降为 0，释放数据块
+                    // 如果链接计数降为 0，只标记待删除，不立即释放
+                    // 真正的删除会在 VFS 层没有引用时通过 drop_inode 触发
                     if new_links == 0 {
-                        // FIXME: 立即释放违反 POSIX 语义！
-                        // 问题：VFS 层可能仍持有 Arc<Inode> 引用，导致 use-after-free
-                        // 正确做法：等待 i_nlink == 0 且 open_count == 0 时才释放
-                        // 临时禁用以验证诊断，会导致磁盘空间泄漏
-                        log::warn!(
-                            "[RENAME] inode {} i_nlink=0 but skipping set_size(0) - deferred deletion not implemented (WILL LEAK SPACE)",
+                        log::info!(
+                            "[RENAME] inode {} i_nlink=0, marked for deferred deletion",
                             old_target_inode
                         );
-                        // old_inode_ref.set_size(0)?;  // 临时禁用
+                        // 不在这里释放，等待 drop_inode 调用
                     }
 
                     (old_is_dir, new_links)
@@ -2131,17 +2145,8 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
                     dst_parent_ref.mark_dirty()?;
                 }
 
-                // 如果链接计数降为 0，释放 inode
-                if new_links == 0 {
-                    // FIXME: 立即释放 inode 号也违反 POSIX 语义！
-                    // 必须等待 i_nlink == 0 且 open_count == 0
-                    // 临时同时禁用 inode 号释放
-                    log::warn!(
-                        "[RENAME] inode {} i_nlink=0 but skipping free_inode() - deferred deletion not implemented (WILL LEAK INODE)",
-                        old_target_inode
-                    );
-                    // self.free_inode(old_target_inode, old_is_dir)?;  // 临时禁用
-                }
+                // 如果链接计数降为 0，inode会在后续被VFS层drop时释放
+                // 这里不做任何操作
             }
             Err(_) => {
                 // 目标不存在，忽略（这是正常情况）
@@ -2277,6 +2282,35 @@ impl<D: BlockDevice> Ext4FileSystem<D> {
                 inode.links_count = (links + 1).to_le();
             })?;
             child_inode_ref.mark_dirty()?;
+        }
+
+        Ok(())
+    }
+
+    /// Deferred deletion: 当VFS层释放最后一个对inode的引用时调用
+    /// 如果 i_nlink == 0，则释放inode的所有资源
+    pub fn drop_inode(&mut self, ino: u32) -> Result<()> {
+        let (nlink, is_dir) = {
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, ino)?;
+            let nlink = inode_ref.with_inode(|inode| {
+                u16::from_le(inode.links_count)
+            })?;
+            let is_dir = inode_ref.is_dir()?;
+            (nlink, is_dir)
+        };
+
+        if nlink == 0 {
+            log::info!("[DROP_INODE] inode {} has nlink=0, freeing resources", ino);
+
+            // 释放数据块
+            let mut inode_ref = InodeRef::get(&mut self.bdev, &mut self.sb, ino)?;
+            inode_ref.set_size(0)?;
+            drop(inode_ref);
+
+            // 释放inode号
+            self.free_inode(ino, is_dir)?;
+        } else {
+            log::debug!("[DROP_INODE] inode {} still has nlink={}, not freeing", ino, nlink);
         }
 
         Ok(())
